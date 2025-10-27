@@ -131,8 +131,6 @@
             const [speedUnit, setSpeedUnit] = useState(() => localStorage.getItem('bowSpeedUnit') || SPEED_UNITS[0]);
             const [viewOffset, setViewOffset] = useState(0);
             const [zoomLevel, setZoomLevel] = useState(1);
-            const [installPrompt, setInstallPrompt] = useState(null);
-            const [isStandalone, setIsStandalone] = useState(false);
 
             const audioContextRef = useRef(null);
             const streamRef = useRef(null);
@@ -143,16 +141,6 @@
             const liveWaveformXRef = useRef(0);
             const draggingPeakIndexRef = useRef(null);
             
-            useEffect(() => {
-                setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone);
-                const handleBeforeInstallPrompt = (e) => {
-                    e.preventDefault();
-                    setInstallPrompt(e);
-                };
-                window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-                return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-            }, []);
-
             useEffect(() => {
                 try {
                     localStorage.setItem('bowSpeedHistory', JSON.stringify(history));
@@ -596,15 +584,6 @@
                     setViewOffset(newOffset);
                 }
             };
-            
-            const handleInstallClick = async () => {
-                if (!installPrompt) return;
-                await installPrompt.prompt();
-                const { outcome } = await installPrompt.userChoice;
-                if (outcome === 'accepted') {
-                    setInstallPrompt(null);
-                }
-            };
 
             const averageSpeedMs = history.length > 0 ? (history.reduce((acc, curr) => acc + curr.speed, 0) / history.length) : null; 
             const averageSpeedDisplay = convertSpeed(averageSpeedMs, speedUnit);
@@ -625,13 +604,6 @@
             
             return (
                 <div className="min-h-screen flex flex-col items-center p-4">
-                    {installPrompt && !isStandalone && (
-                        <div className="w-full max-w-md mx-auto mb-4">
-                            <button onClick={handleInstallClick} className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 animate-fade-in">
-                                Installeer Toep
-                            </button>
-                        </div>
-                    )}
                     <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6 text-center">
                         <h1 className="text-3xl md:text-4xl font-bold text-cyan-400">Boogskiet Snelheid</h1>
 
