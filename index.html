@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="af">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Boogskiet Snelheid</title>
+
+    <!-- PWA and Mobile App Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Snelheid">
+    <meta name="theme-color" content="#111827">
+    <link rel="apple-touch-icon" href="cropped.png">
+    <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiQm9vZ3NraWV0IFNuZWxoZWlkIiwic2hvcnRfbmFtZSI6IlNuZWxoZWlkIiwiZGVzY3JpcHRpb24iOiJBIHNpbXBsZSBjaHJvbm9ncmFwaCBhcHBsaWNhdGlvbiB0aGF0IHVzZXMgdGhlIGRldmljZSdzIG1pY3JvcGhvbmUgdG8gbWVhc3VyZSB0aGUgc3BlZWQgb2YgYW4gYXJyb3cgYnkgZGV0ZWN0aW5nIHRoZSBzb3VuZCBvZiB0aGUgYm93IHNob3QgYW5kIHRoZSBhcnJvdydzIGltcGFjdCBvbiB0aGUgdGFyZ2V0LiIsInN0YXJ0X3VybCI6Ii4iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjMDMwNzEyIiwidGhlbWVfY29sb3IiOiIjMTExODIzIiwiaWNvbnMiOlt7InNyYyI6ImNyb3BwZWQucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9XX0=">
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            touch-action: manipulation;
+            background-color: #030712; /* Darker bg for the whole page */
+        }
+        @keyframes fade-in {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fade-in {
+            animation: fade-in 0.3s ease-out forwards;
+        }
+        /* Custom slider styles for the pan slider */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #374151; /* bg-gray-700 */
+            border-radius: 5px;
+            outline: none;
+            transition: opacity 0.2s;
+        }
+        input[type=range]:disabled {
+            opacity: 0.5;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #67e8f9; /* cyan-300 */
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type=range]:disabled::-webkit-slider-thumb {
+            background: #9ca3af; /* bg-gray-400 */
+            cursor: not-allowed;
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #67e8f9; /* cyan-300 */
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type=range]:disabled::-moz-range-thumb {
+            background: #9ca3af; /* bg-gray-400 */
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const Status = {
+            IDLE: 'IDLE',
+            RECORDING: 'RECORDING',
+            ANALYZING: 'ANALYZING',
+            RESULT: 'RESULT',
+            ERROR: 'ERROR',
+        };
+        
+        const PEAK_DETECTION_THRESHOLD = 0.20;
+        const MIN_PEAK_SPACING_MS = 50;
+        const SPEED_UNITS = ['m/s', 'FPS', 'km/h'];
+        const ZOOM_LEVELS = [6, 5, 4, 3, 2, 1, 0.5]; // In seconds, from zoomed out to zoomed in
+
+        const convertSpeed = (speedInMs, unit) => {
+            if (speedInMs === null || isNaN(speedInMs)) return null;
+            switch (unit) {
+                case 'FPS': return (speedInMs * 3.28084);
+                case 'km/h': return (speedInMs * 3.6);
+                case 'm/s': default: return speedInMs;
+            }
+        };
+        
+        const convertSpeedToMs = (speed, unit) => {
+            if (speed === null || isNaN(speed)) return 0;
+            const numSpeed = parseFloat(speed);
+            switch (unit) {
+                case 'FPS': return numSpeed / 3.28084;
+                case 'km/h': return numSpeed / 3.6;
+                case 'm/s': default: return numSpeed;
+            }
+        };
+
+        const App = () => {
+            const [status, setStatus] = useState(Status.IDLE);
+            const [distance, setDistance] = useState(() => localStorage.getItem('bowSpeedDistance') || '10');
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState('');
+            const [peakPositions, setPeakPositions] = useState([0, 0]);
+            const [fullAudioBuffer, setFullAudioBuffer] = useState(null);
+            const [history, setHistory] = useState(() => {
+                try {
+                    const savedHistory = localStorage.getItem('bowSpeedHistory');
+                    return savedHistory ? JSON.parse(savedHistory) : [];
+                } catch (error) {
+                    console.error("Could not load history from local storage", error);
+                    return [];
+                }
+            });
+            const [editingEntryId, setEditingEntryId] = useState(null);
+            const [editFormData, setEditFormData] = useState({});
+            const [deletingEntryId, setDeletingEntryId] = useState(null);
+            const [speedUnit, setSpeedUnit] = useState(() => localStorage.getItem('bowSpeedUnit') || SPEED_UNITS[0]);
+            const [viewOffset, setViewOffset] = useState(0);
+            const [zoomLevel, setZoomLevel] = useState(1);
+            const [installPrompt, setInstallPrompt] = useState(null);
+            const [isStandalone, setIsStandalone] = useState(false);
+
+            const audioContextRef = useRef(null);
+            const streamRef = useRef(null);
+            const scriptProcessorRef = useRef(null);
+            const audioDataRef = useRef([]);
+            const canvasRef = useRef(null);
+            const sampleRateRef = useRef(0);
+            const liveWaveformXRef = useRef(0);
+            const draggingPeakIndexRef = useRef(null);
+            
+            useEffect(() => {
+                setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone);
+                const handleBeforeInstallPrompt = (e) => {
+                    e.preventDefault();
+                    setInstallPrompt(e);
+                };
+                window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+                return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            }, []);
+
+            useEffect(() => {
+                try {
+                    localStorage.setItem('bowSpeedHistory', JSON.stringify(history));
+                    localStorage.setItem('bowSpeedDistance', distance);
+                    localStorage.setItem('bowSpeedUnit', speedUnit);
+                } catch (error) {
+                    console.error("Could not save to local storage", error);
+                }
+            }, [history, distance, speedUnit]);
+
+            const stopAudio = useCallback(() => {
+                if (streamRef.current) {
+                    streamRef.current.getTracks().forEach(track => track.stop());
+                    streamRef.current = null;
+                }
+                if (scriptProcessorRef.current) {
+                    scriptProcessorRef.current.disconnect();
+                    scriptProcessorRef.current.onaudioprocess = null;
+                    scriptProcessorRef.current = null;
+                }
+                if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                    audioContextRef.current.close().catch(e => console.error("Error closing AudioContext:", e));
+                    audioContextRef.current = null;
+                }
+            }, []);
+
+            const saveCurrentResultToHistory = useCallback(() => {
+                if (status === Status.RESULT && result) {
+                    const newEntry = {
+                        id: Date.now(),
+                        createdAt: new Date().toISOString(),
+                        distance: parseFloat(distance),
+                        speed: result.speed,
+                        timeElapsed: result.timeElapsed,
+                    };
+                    setHistory(prevHistory => [newEntry, ...prevHistory]);
+                }
+            }, [status, result, distance]);
+            
+            const reset = useCallback(() => {
+                saveCurrentResultToHistory();
+                stopAudio();
+                setStatus(Status.IDLE);
+                setResult(null);
+                setError('');
+                audioDataRef.current = [];
+                setPeakPositions([0,0]);
+                setFullAudioBuffer(null);
+                setViewOffset(0);
+                setZoomLevel(1);
+                const canvas = canvasRef.current;
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'rgb(17 24 39)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            }, [stopAudio, saveCurrentResultToHistory]);
+
+            const drawFinalWaveform = useCallback((data, peakIndices, offset, duration) => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+                const sampleRate = sampleRateRef.current;
+            
+                const waveformHeight = height - 20; // Reserve 20px at the bottom for the indicator
+            
+                ctx.fillStyle = 'rgb(17 24 39)';
+                ctx.fillRect(0, 0, width, height);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = '#67e8f9'; // cyan-300
+                
+                if (!data || data.length === 0 || sampleRate === 0) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, waveformHeight / 2);
+                    ctx.lineTo(width, waveformHeight / 2);
+                    ctx.stroke();
+                } else {
+                    const samplesInView = sampleRate * duration;
+                    const viewData = data.subarray(offset, offset + samplesInView);
+                    
+                    ctx.beginPath();
+                    const step = Math.ceil(viewData.length / width);
+                    for (let i = 0; i < width; i++) {
+                        let min = 1.0;
+                        let max = -1.0;
+                        for (let j = 0; j < step; j++) {
+                            const datum = viewData[(i * step) + j];
+                            if (datum < min) min = datum;
+                            if (datum > max) max = datum;
+                        }
+                        ctx.moveTo(i, (1 + min) * waveformHeight / 2);
+                        ctx.lineTo(i, (1 + max) * waveformHeight / 2);
+                    }
+                    ctx.stroke();
+            
+                    if (peakIndices) {
+                        peakIndices.forEach(index => {
+                            if (index >= offset && index < offset + samplesInView) {
+                                const x = ((index - offset) / samplesInView) * width;
+                                ctx.strokeStyle = '#fb7185'; // rose-400
+                                ctx.lineWidth = 2;
+                                ctx.beginPath();
+                                ctx.moveTo(x, 0);
+                                ctx.lineTo(x, waveformHeight); // Stop at the bottom of the waveform area
+                                ctx.stroke();
+                            }
+                        });
+                    }
+                }
+            
+                // Draw time indicator line at the bottom
+                const indicatorY = height - 10;
+                ctx.strokeStyle = '#9ca3af'; // gray-400
+                ctx.lineWidth = 1;
+            
+                ctx.beginPath();
+                ctx.moveTo(0, indicatorY);
+                ctx.lineTo(width, indicatorY);
+                ctx.stroke();
+            
+                ctx.beginPath();
+                ctx.moveTo(0, indicatorY - 4); 
+                ctx.lineTo(0, indicatorY + 4);
+                ctx.moveTo(width / 2, indicatorY - 4);
+                ctx.lineTo(width / 2, indicatorY + 4);
+                ctx.moveTo(width, indicatorY - 4);
+                ctx.lineTo(width, indicatorY + 4);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#9ca3af'; 
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('0s', 2, indicatorY - 8);
+                ctx.textAlign = 'center';
+                ctx.fillText(`${(duration / 2).toFixed(1)}s`, width / 2, indicatorY - 8);
+                ctx.textAlign = 'right';
+                ctx.fillText(`${duration.toFixed(1)}s`, width - 2, indicatorY - 8);
+            
+            }, []);
+
+            const drawLiveWaveform = useCallback((chunk) => {
+                const canvas = canvasRef.current;
+                if (!canvas || !chunk) return;
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+                const waveformHeight = height - 20; // Reserve space for indicator
+                const halfWaveformHeight = waveformHeight / 2;
+                const pixelsPerChunk = 16;
+                let x = liveWaveformXRef.current;
+                
+                const clearWidth = pixelsPerChunk + 2;
+                ctx.fillStyle = 'rgb(17 24 39)';
+                ctx.fillRect(x, 0, clearWidth, height);
+                if (x + clearWidth > width) {
+                    ctx.fillRect(0, 0, (x + clearWidth) % width, height);
+                }
+
+                ctx.strokeStyle = '#67e8f9';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, halfWaveformHeight + chunk[0] * halfWaveformHeight);
+                const samplesPerPixel = chunk.length / pixelsPerChunk;
+
+                for (let i = 1; i < pixelsPerChunk; i++) {
+                    const sampleIndex = Math.floor(i * samplesPerPixel);
+                    if (sampleIndex < chunk.length) {
+                        const newX = x + i;
+                        const newY = halfWaveformHeight + chunk[sampleIndex] * halfWaveformHeight;
+                        ctx.lineTo(newX, newY);
+                    }
+                }
+                ctx.stroke();
+                liveWaveformXRef.current = (x + pixelsPerChunk) % width;
+            }, []);
+
+            const startRecording = useCallback(async () => {
+                const distNum = parseFloat(distance);
+                if (isNaN(distNum) || distNum <= 0) {
+                    setError("Voer asseblief 'n geldige positiewe afstand in.");
+                    setStatus(Status.ERROR);
+                    return;
+                }
+                saveCurrentResultToHistory();
+                
+                stopAudio();
+                setResult(null);
+                setError('');
+                audioDataRef.current = [];
+                setPeakPositions([0,0]);
+                setFullAudioBuffer(null);
+                setViewOffset(0);
+                setZoomLevel(1);
+
+                const canvas = canvasRef.current;
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'rgb(17 24 39)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    liveWaveformXRef.current = 0;
+                }
+
+                try {
+                    streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    const context = new (window.AudioContext || window.webkitAudioContext)();
+                    audioContextRef.current = context;
+                    sampleRateRef.current = context.sampleRate;
+                    const source = context.createMediaStreamSource(streamRef.current);
+                    const processor = context.createScriptProcessor(4096, 1, 1);
+                    scriptProcessorRef.current = processor;
+                    processor.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        audioDataRef.current.push(new Float32Array(inputData));
+                        drawLiveWaveform(inputData);
+                    };
+                    source.connect(processor);
+                    processor.connect(context.destination);
+                    setStatus(Status.RECORDING);
+                } catch (err) {
+                    setError("Mikrofoon toegang geweier. Laat asseblief toegang toe.");
+                    setStatus(Status.ERROR);
+                    stopAudio();
+                }
+            }, [distance, stopAudio, saveCurrentResultToHistory, drawLiveWaveform]);
+            
+            const analyzeAudio = useCallback(() => {
+                if (audioDataRef.current.length === 0) {
+                     setError("Geen klank opgeneem nie.");
+                     setStatus(Status.ERROR);
+                     drawFinalWaveform(null, [], 0, zoomLevel);
+                     return;
+                }
+                const buffer = new Float32Array(audioDataRef.current.reduce((acc, val) => acc + val.length, 0));
+                let offset = 0;
+                for (const chunk of audioDataRef.current) { buffer.set(chunk, offset); offset += chunk.length; }
+                setFullAudioBuffer(buffer);
+
+                const sampleRate = sampleRateRef.current;
+                const minPeakDistance = Math.round(sampleRate * (MIN_PEAK_SPACING_MS / 1000));
+                
+                let peaks = [];
+                for (let i = 1; i < buffer.length - 1; i++) {
+                    const absVal = Math.abs(buffer[i]);
+                    if (absVal > PEAK_DETECTION_THRESHOLD && absVal > Math.abs(buffer[i-1]) && absVal > Math.abs(buffer[i+1])) {
+                        peaks.push({ index: i, value: absVal });
+                    }
+                }
+                peaks.sort((a, b) => b.value - a.value);
+
+                let filteredPeaks = [];
+                while(peaks.length > 0){
+                    const currentPeak = peaks.shift();
+                    filteredPeaks.push(currentPeak);
+                    peaks = peaks.filter(p => Math.abs(p.index - currentPeak.index) > minPeakDistance);
+                }
+
+                if (filteredPeaks.length < 2) {
+                    setError("Kon nie twee duidelike klanke opspoor nie.");
+                    setStatus(Status.ERROR);
+                    drawFinalWaveform(buffer, [], 0, zoomLevel);
+                    return;
+                }
+                
+                const twoLoudest = filteredPeaks.slice(0, 2).sort((a, b) => a.index - b.index);
+                const newPeakPositions = [twoLoudest[0].index, twoLoudest[1].index];
+                setPeakPositions(newPeakPositions);
+
+                const midPoint = newPeakPositions[0] + (newPeakPositions[1] - newPeakPositions[0]) / 2;
+                const samplesInView = sampleRate * zoomLevel;
+                const maxOffset = buffer.length - samplesInView;
+                
+                let newOffset = Math.round(midPoint - (samplesInView / 2));
+                newOffset = Math.max(0, newOffset);
+                newOffset = Math.min(newOffset, maxOffset > 0 ? maxOffset : 0);
+
+                setViewOffset(newOffset);
+                setStatus(Status.RESULT);
+            }, [drawFinalWaveform, zoomLevel]);
+
+            const stopRecording = useCallback(() => {
+                stopAudio();
+                setStatus(Status.ANALYZING);
+                setTimeout(analyzeAudio, 100);
+            }, [stopAudio, analyzeAudio]);
+            
+            const handleUnitCycle = () => {
+                const currentIndex = SPEED_UNITS.indexOf(speedUnit);
+                const nextIndex = (currentIndex + 1) % SPEED_UNITS.length;
+                setSpeedUnit(SPEED_UNITS[nextIndex]);
+            };
+
+            const getSampleIndexFromCanvasX = useCallback((canvasX) => {
+                const canvas = canvasRef.current;
+                if (!canvas || !sampleRateRef.current) return 0;
+                const samplesInView = sampleRateRef.current * zoomLevel;
+                const percent = canvasX / canvas.width;
+                return viewOffset + Math.round(percent * samplesInView);
+            }, [viewOffset, zoomLevel]);
+
+            const getCanvasXFromSampleIndex = useCallback((sampleIndex) => {
+                const canvas = canvasRef.current;
+                if (!canvas || !sampleRateRef.current) return null;
+                const samplesInView = sampleRateRef.current * zoomLevel;
+                if (sampleIndex < viewOffset || sampleIndex > viewOffset + samplesInView) {
+                    return null; // Not in view
+                }
+                const relativeIndex = sampleIndex - viewOffset;
+                const percent = relativeIndex / samplesInView;
+                return percent * canvas.width;
+            }, [viewOffset, zoomLevel]);
+
+
+            const handleCanvasInteraction = useCallback((e, type) => {
+                if (status !== Status.RESULT) return;
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const x = clientX - rect.left;
+
+                const canvasX = x * (canvas.width / rect.width);
+                
+                const hitThresholdInPixels = 10;
+
+                const peak1_x = getCanvasXFromSampleIndex(peakPositions[0]);
+                const peak2_x = getCanvasXFromSampleIndex(peakPositions[1]);
+                
+                const distToPeak1_px = peak1_x !== null ? Math.abs(canvasX - peak1_x) : Infinity;
+                const distToPeak2_px = peak2_x !== null ? Math.abs(canvasX - peak2_x) : Infinity;
+
+                if (type === 'down') {
+                    if (distToPeak1_px <= hitThresholdInPixels && distToPeak1_px < distToPeak2_px) {
+                        draggingPeakIndexRef.current = 0;
+                    } else if (distToPeak2_px <= hitThresholdInPixels) {
+                        draggingPeakIndexRef.current = 1;
+                    } else {
+                        draggingPeakIndexRef.current = null;
+                    }
+                } else if (type === 'move') {
+                    if (draggingPeakIndexRef.current === null) {
+                        if (distToPeak1_px <= hitThresholdInPixels || distToPeak2_px <= hitThresholdInPixels) {
+                            canvas.style.cursor = 'ew-resize';
+                        } else {
+                            canvas.style.cursor = 'default';
+                        }
+                    }
+                    
+                    if (draggingPeakIndexRef.current !== null) {
+                        const currentSampleIndex = getSampleIndexFromCanvasX(canvasX);
+                        let newIndex = Math.max(0, Math.min(fullAudioBuffer.length - 1, currentSampleIndex));
+                        let newPositions = [...peakPositions];
+
+                        if (draggingPeakIndexRef.current === 0) {
+                            newIndex = Math.min(newIndex, peakPositions[1] - 1);
+                        } else {
+                            newIndex = Math.max(newIndex, peakPositions[0] + 1);
+                        }
+
+                        newPositions[draggingPeakIndexRef.current] = newIndex;
+                        setPeakPositions(newPositions);
+                    }
+                } else if (type === 'up') {
+                    draggingPeakIndexRef.current = null;
+                }
+            }, [status, peakPositions, fullAudioBuffer, getCanvasXFromSampleIndex, getSampleIndexFromCanvasX]);
+
+            useEffect(() => {
+                if (status === Status.RESULT && peakPositions && fullAudioBuffer) {
+                    const dist = parseFloat(distance);
+                    if (isNaN(dist) || dist <= 0) return;
+
+                    const sortedPeaks = [...peakPositions].sort((a, b) => a - b);
+                    const [firstIndex, secondIndex] = sortedPeaks;
+                    
+                    const timeElapsed = (secondIndex - firstIndex) / sampleRateRef.current;
+                    if (timeElapsed > 0) {
+                        const speedInMs = dist / timeElapsed;
+                        setResult({ speed: speedInMs, timeElapsed });
+                    } else {
+                        setResult({ speed: 0, timeElapsed: 0 });
+                    }
+                    drawFinalWaveform(fullAudioBuffer, peakPositions, viewOffset, zoomLevel);
+                }
+            }, [peakPositions, distance, status, fullAudioBuffer, drawFinalWaveform, viewOffset, zoomLevel]);
+
+            useEffect(() => {
+                if (status !== Status.RECORDING) {
+                    drawFinalWaveform(fullAudioBuffer, peakPositions, viewOffset, zoomLevel);
+                }
+             }, [fullAudioBuffer, peakPositions, drawFinalWaveform, status, viewOffset, zoomLevel]);
+             
+            useEffect(() => { return stopAudio; }, [stopAudio]);
+
+            const handleEditStart = (entry) => {
+                setEditingEntryId(entry.id);
+                const speedInCurrentUnit = convertSpeed(entry.speed, speedUnit);
+                setEditFormData({ ...entry, speed: speedInCurrentUnit !== null ? speedInCurrentUnit.toFixed(2) : '0.00', timeElapsed: entry.timeElapsed.toFixed(3) });
+            };
+            const handleEditChange = (e) => {
+                const { name, value } = e.target;
+                setEditFormData(prev => ({ ...prev, [name]: value }));
+            };
+            const handleEditSave = (id) => {
+                const speedInMs = convertSpeedToMs(editFormData.speed, speedUnit);
+                setHistory(history.map(entry => entry.id === id ? { ...entry, distance: parseFloat(editFormData.distance) || 0, speed: speedInMs, timeElapsed: parseFloat(editFormData.timeElapsed) || 0 } : entry));
+                setEditingEntryId(null);
+            };
+            const handleDeleteConfirm = () => {
+                setHistory(history.filter(entry => entry.id !== deletingEntryId));
+                setDeletingEntryId(null);
+            };
+
+            const handleZoom = (direction) => { // +1 for zoom in, -1 for zoom out
+                if (status !== Status.RESULT || !fullAudioBuffer) return;
+                const currentIndex = ZOOM_LEVELS.indexOf(zoomLevel);
+                const newIndex = currentIndex + direction;
+
+                if (newIndex >= 0 && newIndex < ZOOM_LEVELS.length) {
+                    const newZoomLevel = ZOOM_LEVELS[newIndex];
+                    
+                    let centerOfView;
+                    // If we have valid peaks, center between them.
+                    if (peakPositions[0] > 0 && peakPositions[1] > 0) {
+                        centerOfView = peakPositions[0] + (peakPositions[1] - peakPositions[0]) / 2;
+                    } else {
+                        // Otherwise, center on the middle of the current view.
+                        const samplesInOldView = sampleRateRef.current * zoomLevel;
+                        centerOfView = viewOffset + samplesInOldView / 2;
+                    }
+
+                    const samplesInNewView = sampleRateRef.current * newZoomLevel;
+                    const maxOffset = Math.max(0, fullAudioBuffer.length - samplesInNewView);
+
+                    let newOffset = Math.round(centerOfView - samplesInNewView / 2);
+                    newOffset = Math.max(0, Math.min(newOffset, maxOffset));
+                    
+                    setZoomLevel(newZoomLevel);
+                    setViewOffset(newOffset);
+                }
+            };
+            
+            const handleInstallClick = async () => {
+                if (!installPrompt) return;
+                await installPrompt.prompt();
+                const { outcome } = await installPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    setInstallPrompt(null);
+                }
+            };
+
+            const averageSpeedMs = history.length > 0 ? (history.reduce((acc, curr) => acc + curr.speed, 0) / history.length) : null; 
+            const averageSpeedDisplay = convertSpeed(averageSpeedMs, speedUnit);
+            const currentSpeedDisplay = convertSpeed(result ? result.speed : null, speedUnit);
+            const panSliderMax = fullAudioBuffer ? Math.max(0, fullAudioBuffer.length - (sampleRateRef.current * zoomLevel)) : 0;
+            const isMinZoom = ZOOM_LEVELS.indexOf(zoomLevel) === ZOOM_LEVELS.length - 1; // max zoom in
+            const isMaxZoom = ZOOM_LEVELS.indexOf(zoomLevel) === 0; // max zoom out
+
+            const buttonConfig = (() => {
+                switch (status) {
+                    case Status.RECORDING: return { text: "Stop", onClick: stopRecording, color: 'bg-red-600 hover:bg-red-700' };
+                    case Status.ANALYZING: return { text: "Ontleed...", disabled: true, color: 'bg-yellow-600' };
+                    case Status.RESULT:
+                    case Status.ERROR: return { text: "Bevestig lesing en skiet weer", onClick: reset, color: 'bg-blue-600 hover:bg-blue-700' };
+                    case Status.IDLE: default: return { text: "Begin", onClick: startRecording, color: 'bg-green-600 hover:bg-green-700' };
+                }
+            })();
+            
+            return (
+                <div className="min-h-screen flex flex-col items-center p-4">
+                    {installPrompt && !isStandalone && (
+                        <div className="w-full max-w-md mx-auto mb-4">
+                            <button onClick={handleInstallClick} className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 animate-fade-in">
+                                Installeer Toep
+                            </button>
+                        </div>
+                    )}
+                    <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6 text-center">
+                        <h1 className="text-3xl md:text-4xl font-bold text-cyan-400">Boogskiet Snelheid</h1>
+
+                        <div className="bg-gray-700 p-6 rounded-xl cursor-pointer" onClick={handleUnitCycle} title="Click to change units">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-sm text-gray-400 uppercase">Spoed</p>
+                                    <p className="text-4xl font-bold text-white">{currentSpeedDisplay !== null ? currentSpeedDisplay.toFixed(2) : '--'}</p>
+                                    <div className="flex justify-center space-x-4 mt-1 text-lg">
+                                        {SPEED_UNITS.map(unit => (<span key={unit} className={`font-semibold transition-colors ${speedUnit === unit ? 'text-cyan-400' : 'text-gray-500'}`}>{unit}</span>))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-gray-400 uppercase">Tyd</p>
+                                    <p className="text-4xl font-bold text-white">{result ? result.timeElapsed.toFixed(3) : '--'}</p>
+                                    <p className="text-lg text-gray-300 mt-1">sek</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <canvas 
+                            ref={canvasRef} 
+                            width="400" 
+                            height="150" 
+                            className="bg-gray-900 rounded-lg w-full"
+                            onMouseDown={(e) => handleCanvasInteraction(e, 'down')}
+                            onTouchStart={(e) => handleCanvasInteraction(e, 'down')}
+                            onMouseMove={(e) => handleCanvasInteraction(e, 'move')}
+                            onTouchMove={(e) => handleCanvasInteraction(e, 'move')}
+                            onMouseUp={(e) => handleCanvasInteraction(e, 'up')}
+                            onMouseLeave={(e) => handleCanvasInteraction(e, 'up')}
+                            onTouchEnd={(e) => handleCanvasInteraction(e, 'up')}
+                        ></canvas>
+
+                        <div className="space-y-2 pt-2">
+                             <div className="flex items-end px-1">
+                                <label className="text-sm font-medium text-gray-300 w-10 text-center">Zoom</label>
+                                <label className="text-sm font-medium text-gray-300 flex-grow text-center ml-2">Posisie</label>
+                             </div>
+                             <div className="flex items-center space-x-2">
+                                <div className="flex flex-col space-y-1">
+                                    <button onClick={() => handleZoom(1)} disabled={isMinZoom || status !== Status.RESULT} className="w-10 h-8 flex items-center justify-center bg-gray-700 rounded-md disabled:opacity-50 font-mono text-lg">+</button>
+                                    <button onClick={() => handleZoom(-1)} disabled={isMaxZoom || status !== Status.RESULT} className="w-10 h-8 flex items-center justify-center bg-gray-700 rounded-md disabled:opacity-50 font-mono text-lg">-</button>
+                                </div>
+                                <input type="range" min="0" max={panSliderMax} value={viewOffset} onChange={(e) => setViewOffset(parseInt(e.target.value))} disabled={status !== Status.RESULT} className="flex-grow" />
+                             </div>
+                        </div>
+
+                        <div className="w-full space-y-2 pt-4">
+                            <div>
+                                <label htmlFor="distance" className="block text-lg font-medium text-gray-300 mb-2">Afstand (meters)</label>
+                                <input type="number" id="distance" value={distance} onChange={(e) => setDistance(e.target.value)} disabled={status === Status.RECORDING || status === Status.ANALYZING} className="w-full p-3 text-center text-xl bg-gray-700 border-2 border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" placeholder="e.g., 20" />
+                            </div>
+                            <button onClick={buttonConfig.onClick} disabled={buttonConfig.disabled} className={`w-full flex items-center justify-center text-white text-xl font-bold py-4 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-opacity-50 ${buttonConfig.color} ${buttonConfig.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                {buttonConfig.text}
+                            </button>
+                             {error && <p className="text-red-400 font-semibold pt-2">{error}</p>}
+                        </div>
+                    </div>
+                    
+                    {history.length > 0 && (
+                        <div className="w-full max-w-md mx-auto mt-8 mb-4">
+                            <div className="space-y-4">
+                                <div className="bg-gray-800 rounded-lg p-4 text-center">
+                                    <p className="text-sm text-gray-400 uppercase">Gemiddelde Spoed</p>
+                                    <p className="text-3xl font-bold text-white">{averageSpeedDisplay !== null ? averageSpeedDisplay.toFixed(2) : '--'} {speedUnit}</p>
+                                </div>
+                                <h2 className="text-xl font-bold text-cyan-400 text-center">Vorige Getalle</h2>
+                                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                    {history.map(entry => {
+                                        const convertedSpeed = convertSpeed(entry.speed, speedUnit);
+                                        return (
+                                        <div key={entry.id} className="bg-gray-800 p-4 rounded-lg animate-fade-in">
+                                            {editingEntryId === entry.id ? (
+                                                <div className="space-y-3">
+                                                    <div className="grid grid-cols-3 gap-2 text-sm">
+                                                        <input type="number" name="distance" value={editFormData.distance} onChange={handleEditChange} className="w-full bg-gray-700 rounded p-1 text-center" />
+                                                        <div className="relative"><input type="number" name="speed" value={editFormData.speed} onChange={handleEditChange} className="w-full bg-gray-700 rounded p-1 text-center pr-8" /><span className="absolute right-1 top-1/2 -translate-y-1/2 text-xs text-gray-400">{speedUnit}</span></div>
+                                                        <input type="number" name="timeElapsed" value={editFormData.timeElapsed} onChange={handleEditChange} className="w-full bg-gray-700 rounded p-1 text-center" />
+                                                    </div>
+                                                    <div className="flex justify-end space-x-2"><button onClick={() => setEditingEntryId(null)} className="px-3 py-1 bg-gray-600 rounded text-xs">Kanselleer</button><button onClick={() => handleEditSave(entry.id)} className="px-3 py-1 bg-green-600 rounded text-xs">Stoor</button></div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <div className="grid grid-cols-3 gap-2 text-center">
+                                                        <div><span className="text-xs text-gray-400">Afstand:</span> {entry.distance.toFixed(1)}m</div>
+                                                        <div><span className="text-xs text-gray-400">Spoed:</span> {convertedSpeed !== null ? convertedSpeed.toFixed(2) : '--'} {speedUnit.toLowerCase()}</div>
+                                                        <div><span className="text-xs text-gray-400">Tyd:</span> {entry.timeElapsed.toFixed(3)}s</div>
+                                                    </div>
+                                                    <div className="text-right text-xs text-gray-500 mt-2">{new Date(entry.createdAt).toLocaleString()}</div>
+                                                    <div className="flex justify-end space-x-2 mt-2"><button onClick={() => handleEditStart(entry)} className="px-3 py-1 bg-blue-600 rounded text-xs">Wysig</button><button onClick={() => setDeletingEntryId(entry.id)} className="px-3 py-1 bg-red-600 rounded text-xs">Verwyder</button></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )})}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {deletingEntryId && (
+                        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center animate-fade-in z-50 p-4">
+                            <div className="bg-gray-800 rounded-lg p-6 text-center space-y-4">
+                                <h3 className="text-lg font-bold">Bevestig Verwydering</h3>
+                                <p>Is jy seker jy wil hierdie lesing verwyder?</p>
+                                <div className="flex justify-center space-x-4"><button onClick={() => setDeletingEntryId(null)} className="px-4 py-2 bg-gray-600 rounded-lg font-semibold">Kanselleer</button><button onClick={handleDeleteConfirm} className="px-4 py-2 bg-red-600 rounded-lg font-semibold">Verwyder</button></div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<App />);
+    </script>
+</body>
+</html>
