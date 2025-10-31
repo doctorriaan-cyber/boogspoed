@@ -110,6 +110,7 @@
         const MAX_PEAK_SPACING_S = 1.5;  // 1.5s
         const SPEED_UNITS = ['m/s', 'FPS', 'km/h'];
         const GRAPH_TIME_WINDOW_S = 0.5;
+        const SPEED_OF_SOUND_MS = 343;
 
         const convertSpeed = (speedInMs, unit) => {
             if (speedInMs === null || isNaN(speedInMs)) return null;
@@ -118,6 +119,22 @@
                 case 'km/h': return (speedInMs * 3.6);
                 case 'm/s': default: return speedInMs;
             }
+        };
+
+        const calculateSpeed = (distanceMeters, totalTimeSeconds) => {
+            if (distanceMeters <= 0 || totalTimeSeconds <= 0) return null;
+            
+            // Time for sound to travel from target to microphone
+            const tSound = distanceMeters / SPEED_OF_SOUND_MS;
+            
+            // Time for arrow to travel to target
+            const tArrow = totalTimeSeconds - tSound;
+
+            // If tArrow is non-positive, the measurement is invalid (e.g., faster than sound or an error)
+            if (tArrow <= 0) return null;
+            
+            const arrowSpeed = distanceMeters / tArrow;
+            return arrowSpeed;
         };
 
         const App = () => {
@@ -197,9 +214,9 @@
                 if (editingShot && editedShotData) {
                     const dist = parseFloat(distance);
                     if (!isNaN(dist) && dist > 0 && editedShotData.timeElapsed > 0) {
-                        const newSpeed = dist / editedShotData.timeElapsed;
+                        const newSpeed = calculateSpeed(dist, editedShotData.timeElapsed);
                         // Only update if the speed is different to avoid re-render loops
-                        if (Math.abs(newSpeed - editedShotData.speed) > 1e-9) {
+                        if (newSpeed !== editedShotData.speed) {
                            setEditedShotData(prev => ({ ...prev, speed: newSpeed }));
                         }
                     }
@@ -342,7 +359,7 @@
                         samplesToBufferAfterShotRef.current -= inputData.length;
                         if (samplesToBufferAfterShotRef.current <= 0) {
                             const { timeElapsed, dist, firstPeakIndexInBuffer, secondPeakIndexInBuffer } = shotToProcessRef.current;
-                            const speedInMs = dist / timeElapsed;
+                            const speedInMs = calculateSpeed(dist, timeElapsed);
                             const fullWaveform = new Float32Array(shotWaveformBufferRef.current);
                             const peakMidpointInSamples = firstPeakIndexInBuffer + ((secondPeakIndexInBuffer - firstPeakIndexInBuffer) / 2);
                             const displayWidthInSamples = Math.floor(sampleRateRef.current * GRAPH_TIME_WINDOW_S);
@@ -498,7 +515,9 @@
 
             const saveSessionToHistory = useCallback(() => {
                 if (sessionShots.length > 0) {
-                     const averageSpeed = sessionShots.reduce((acc, s) => acc + s.speed, 0) / sessionShots.length;
+                    const validShots = sessionShots.filter(s => s.speed !== null && s.speed > 0);
+                    if (validShots.length === 0) return; // Don't save a session with no valid shots
+                    const averageSpeed = validShots.reduce((acc, s) => acc + s.speed, 0) / validShots.length;
                     const newEntry = { id: Date.now(), createdAt: new Date().toISOString(), distance: parseFloat(distance), averageSpeed: averageSpeed, shots: [...sessionShots] };
                     setHistory(prev => [newEntry, ...prev]);
                 }
@@ -571,7 +590,8 @@
                     if (session.id === sessionId) {
                         const newShots = [...session.shots];
                         newShots[shotIndex] = editedShotData;
-                        const newAverageSpeed = newShots.reduce((acc, s) => acc + s.speed, 0) / newShots.length;
+                        const validShots = newShots.filter(s => s.speed !== null && s.speed > 0);
+                        const newAverageSpeed = validShots.length > 0 ? validShots.reduce((acc, s) => acc + s.speed, 0) / validShots.length : 0;
                         return { ...session, distance: parseFloat(distance), shots: newShots, averageSpeed: newAverageSpeed };
                     }
                     return session;
@@ -587,7 +607,8 @@
                     if (session.id === sessionId) {
                         const newShots = session.shots.filter((_, index) => index !== shotIndex);
                         if (newShots.length === 0) return null; // Mark for removal
-                        const newAverageSpeed = newShots.reduce((acc, s) => acc + s.speed, 0) / newShots.length;
+                        const validShots = newShots.filter(s => s.speed !== null && s.speed > 0);
+                        const newAverageSpeed = validShots.length > 0 ? validShots.reduce((acc, s) => acc + s.speed, 0) / validShots.length : 0;
                         return { ...session, shots: newShots, averageSpeed: newAverageSpeed };
                     }
                     return session;
@@ -635,7 +656,7 @@
                         const timePerSample = GRAPH_TIME_WINDOW_S / waveformData.length;
                         const newTimeElapsed = (newPeak2 - newPeak1) * timePerSample;
                         const dist = parseFloat(distance);
-                        const newSpeed = (newTimeElapsed > 0 && dist > 0) ? dist / newTimeElapsed : 0;
+                        const newSpeed = calculateSpeed(dist, newTimeElapsed);
                         const newEditedData = { ...editedShotData, peak1Index: newPeak1, peak2Index: newPeak2, timeElapsed: newTimeElapsed, speed: newSpeed };
                         setEditedShotData(newEditedData);
                         drawShotWaveform(newEditedData.waveformData, newEditedData.peak1Index, newEditedData.peak2Index);
