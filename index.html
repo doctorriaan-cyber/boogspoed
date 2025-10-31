@@ -139,9 +139,18 @@
             const [history, setHistory] = useState(() => {
                 try {
                     const savedHistory = localStorage.getItem('bowSpeedHistory');
-                    return savedHistory ? JSON.parse(savedHistory) : [];
+                    if (!savedHistory) return [];
+                    const parsedHistory = JSON.parse(savedHistory);
+            
+                    if (Array.isArray(parsedHistory)) {
+                        // Filter out any sessions that don't have a valid 'shots' array.
+                        // This prevents crashes from corrupt or outdated localStorage data.
+                        return parsedHistory.filter(session => Array.isArray(session?.shots));
+                    }
+                    return []; // If not an array, discard it.
                 } catch (error) {
-                    console.error("Could not load history from local storage", error);
+                    console.error("Could not load or parse history from local storage", error);
+                    localStorage.removeItem('bowSpeedHistory'); // Clear corrupt data.
                     return [];
                 }
             });
