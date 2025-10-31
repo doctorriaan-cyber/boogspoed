@@ -64,6 +64,39 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
 
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null, errorInfo: null };
+            }
+
+            static getDerivedStateFromError(error) {
+                return { hasError: true };
+            }
+
+            componentDidCatch(error, errorInfo) {
+                this.setState({ error, errorInfo });
+                console.error("ErrorBoundary caught an error", error, errorInfo);
+            }
+
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="text-white bg-red-800 p-4 rounded-lg m-4 max-w-md mx-auto">
+                            <h1 className="text-xl font-bold">Iets het verkeerd geloop.</h1>
+                            <p>Herlaai asseblief die bladsy en probeer weer.</p>
+                            {this.state.error && (
+                                <pre className="mt-4 text-sm whitespace-pre-wrap bg-red-900 p-2 rounded">
+                                    {this.state.error.toString()}
+                                </pre>
+                            )}
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
         const Status = {
             IDLE: 'IDLE',
             RECORDING: 'RECORDING',
@@ -88,6 +121,7 @@
         };
 
         const App = () => {
+            const [micInitialized, setMicInitialized] = useState(false);
             const [status, setStatus] = useState(Status.IDLE);
             const [distance, setDistance] = useState(() => localStorage.getItem('bowSpeedDistance') || '10');
             const [shotsPerRound, setShotsPerRound] = useState(() => localStorage.getItem('bowShotsPerRound') || '3');
@@ -97,8 +131,8 @@
             const [currentShot, setCurrentShot] = useState({ speed: null, timeElapsed: null });
             const [gain, setGain] = useState(() => parseFloat(localStorage.getItem('bowSpeedGain') || '1'));
             
-            const [editingShot, setEditingShot] = useState(null); // { sessionId, shotIndex }
-            const [editedShotData, setEditedShotData] = useState(null); // a copy of the shot object being edited
+            const [editingShot, setEditingShot] = useState(null);
+            const [editedShotData, setEditedShotData] = useState(null);
             const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
             const [canvasCursor, setCanvasCursor] = useState('auto');
             
@@ -115,29 +149,23 @@
 
             const audioContextRef = useRef(null);
             const streamRef = useRef(null);
-            const scriptProcessorRef = useRef(null);
             const gainNodeRef = useRef(null);
             const analyserNodeRef = useRef(null);
+            const scriptProcessorRef = useRef(null);
             const animationFrameIdRef = useRef(null);
             const canvasRef = useRef(null);
             const liveCanvasRef = useRef(null);
             const sampleRateRef = useRef(0);
+            
             const totalSamplesRef = useRef(0);
             const firstPeakIndexRef = useRef(null);
             const shotWaveformBufferRef = useRef([]);
             const shotToProcessRef = useRef(null);
             const samplesToBufferAfterShotRef = useRef(0);
-            const processingStateRef = useRef({ sessionShotsLength: 0, totalTargetShots: 0 });
             const lastShotDisplayRef = useRef(null);
-            const draggingPeakRef = useRef(null); // 'peak1', 'peak2', or null
+            const draggingPeakRef = useRef(null);
 
-            useEffect(() => {
-                processingStateRef.current = {
-                    sessionShotsLength: sessionShots.length,
-                    totalTargetShots: totalTargetShots,
-                };
-            }, [sessionShots, totalTargetShots]);
-            
+            // --- Local Storage and State Syncing ---
             useEffect(() => {
                 try {
                     localStorage.setItem('bowSpeedHistory', JSON.stringify(history));
@@ -150,27 +178,32 @@
                 }
             }, [history, distance, shotsPerRound, speedUnit, gain]);
             
-             useEffect(() => {
+            useEffect(() => {
                 if (gainNodeRef.current && audioContextRef.current) {
                     gainNodeRef.current.gain.setValueAtTime(gain, audioContextRef.current.currentTime);
                 }
             }, [gain]);
 
-             useEffect(() => {
+            useEffect(() => {
                 if (editingShot && editedShotData) {
                     const dist = parseFloat(distance);
                     if (!isNaN(dist) && dist > 0 && editedShotData.timeElapsed > 0) {
                         const newSpeed = dist / editedShotData.timeElapsed;
-                        setEditedShotData(prev => ({ ...prev, speed: newSpeed }));
+                        // Only update if the speed is different to avoid re-render loops
+                        if (Math.abs(newSpeed - editedShotData.speed) > 1e-9) {
+                           setEditedShotData(prev => ({ ...prev, speed: newSpeed }));
+                        }
                     }
                 }
             }, [distance, editingShot, editedShotData]);
 
+            // --- Waveform Drawing ---
             const drawLiveWaveform = useCallback(() => {
                 if (!analyserNodeRef.current || !liveCanvasRef.current) {
                     animationFrameIdRef.current = requestAnimationFrame(drawLiveWaveform);
                     return;
                 }
+                
                 const analyser = analyserNodeRef.current;
                 const canvas = liveCanvasRef.current;
                 const ctx = canvas.getContext('2d');
@@ -178,6 +211,7 @@
                 const bufferLength = analyser.fftSize;
                 const dataArray = new Float32Array(bufferLength);
                 analyser.getFloatTimeDomainData(dataArray);
+                
                 ctx.fillStyle = 'rgb(17 24 39)';
                 ctx.fillRect(0, 0, width, height);
                 ctx.lineWidth = 2;
@@ -188,73 +222,48 @@
                 for (let i = 0; i < bufferLength; i++) {
                     const v = dataArray[i] * height / 2;
                     const y = height / 2 + v;
-                    if (i === 0) {
-                        ctx.moveTo(x, y);
-                    } else {
-                        ctx.lineTo(x, y);
-                    }
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
                     x += sliceWidth;
                 }
                 ctx.lineTo(width, height / 2);
                 ctx.stroke();
+                
                 animationFrameIdRef.current = requestAnimationFrame(drawLiveWaveform);
             }, []);
 
-            const stopAudio = useCallback(() => {
-                if (animationFrameIdRef.current) {
-                    cancelAnimationFrame(animationFrameIdRef.current);
-                    animationFrameIdRef.current = null;
+            useEffect(() => {
+                if (micInitialized) {
+                    animationFrameIdRef.current = requestAnimationFrame(drawLiveWaveform);
                 }
-                if (liveCanvasRef.current) {
-                    const ctx = liveCanvasRef.current.getContext('2d');
-                    ctx.fillStyle = 'rgb(17 24 39)';
-                    ctx.fillRect(0, 0, liveCanvasRef.current.width, liveCanvasRef.current.height);
-                }
-                if (streamRef.current) {
-                    streamRef.current.getTracks().forEach(track => track.stop());
-                    streamRef.current = null;
-                }
-                if (scriptProcessorRef.current) {
-                    scriptProcessorRef.current.disconnect();
-                    scriptProcessorRef.current.onaudioprocess = null;
-                    scriptProcessorRef.current = null;
-                }
-                if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-                    audioContextRef.current.close().catch(e => console.error("Error closing AudioContext:", e));
-                    audioContextRef.current = null;
-                }
-            }, []);
+                return () => {
+                    if (animationFrameIdRef.current) {
+                        cancelAnimationFrame(animationFrameIdRef.current);
+                        animationFrameIdRef.current = null;
+                    }
+                };
+            }, [micInitialized, drawLiveWaveform]);
 
             const drawHighFidelityWaveform = useCallback((ctx, waveformData, color) => {
                 const width = ctx.canvas.width;
                 const height = ctx.canvas.height;
                 const halfHeight = height / 2;
-
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 1;
-
                 const samplesPerPixel = waveformData.length / width;
-                
                 ctx.beginPath();
                 for (let x = 0; x < width; x++) {
                     const startIndex = Math.floor(x * samplesPerPixel);
-                    const endIndex = Math.min(Math.floor((x + 1) * samplesPerPixel), waveformData.length -1);
-                    let min = 1.0;
-                    let max = -1.0;
-
+                    const endIndex = Math.min(Math.floor((x + 1) * samplesPerPixel), waveformData.length - 1);
+                    let min = 1.0, max = -1.0;
                     for (let i = startIndex; i < endIndex; i++) {
                         const sample = waveformData[i] || 0;
                         if (sample < min) min = sample;
                         if (sample > max) max = sample;
                     }
-                    
                     if (min > max) { min = 0; max = 0; }
-
-                    const yMin = halfHeight + min * halfHeight;
-                    const yMax = halfHeight + max * halfHeight;
-                    
-                    ctx.moveTo(x + 0.5, yMin);
-                    ctx.lineTo(x + 0.5, yMax);
+                    ctx.moveTo(x + 0.5, halfHeight + min * halfHeight);
+                    ctx.lineTo(x + 0.5, halfHeight + max * halfHeight);
                 }
                 ctx.stroke();
             }, []);
@@ -264,10 +273,8 @@
                 if (!canvas || !waveformData || waveformData.length === 0) return;
                 const ctx = canvas.getContext('2d');
                 const { width, height } = canvas;
-
                 ctx.fillStyle = 'rgb(17 24 39)';
                 ctx.fillRect(0, 0, width, height);
-                
                 ctx.strokeStyle = 'rgba(107, 114, 128, 0.3)';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
@@ -277,20 +284,16 @@
                     ctx.lineTo(x + 0.5, height);
                 }
                 ctx.stroke();
-
                 drawHighFidelityWaveform(ctx, waveformData, '#67e8f9');
-
                 if (peak1Index !== null && peak2Index !== null) {
                     ctx.strokeStyle = '#f87171';
                     ctx.lineWidth = 1.5;
                     const x1 = (peak1Index / waveformData.length) * width;
                     const x2 = (peak2Index / waveformData.length) * width;
-                    
                     ctx.beginPath();
                     ctx.moveTo(x1, 0);
                     ctx.lineTo(x1, height);
                     ctx.stroke();
-
                     ctx.beginPath();
                     ctx.moveTo(x2, 0);
                     ctx.lineTo(x2, height);
@@ -306,164 +309,160 @@
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
                 }
             }, []);
-            
-            useEffect(() => {
-                if (status === Status.RECORDING && totalTargetShots > 0 && sessionShots.length >= totalTargetShots) {
-                    stopAudio();
-                    setStatus(Status.ROUND_COMPLETE);
+
+            // --- Audio Processing Logic ---
+            const stopProcessing = useCallback(() => {
+                if (scriptProcessorRef.current) {
+                    scriptProcessorRef.current.disconnect();
+                    scriptProcessorRef.current.onaudioprocess = null;
                 }
-            }, [sessionShots.length, totalTargetShots, status, stopAudio]);
+            }, []);
+            
+            const startProcessing = useCallback(() => {
+                if (!scriptProcessorRef.current || !gainNodeRef.current || !audioContextRef.current) return;
+                
+                scriptProcessorRef.current.onaudioprocess = (e) => {
+                    if (status !== Status.RECORDING) return;
+                    if (totalTargetShots > 0 && sessionShots.length >= totalTargetShots) return;
 
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const currentSampleOffset = totalSamplesRef.current;
 
-            const startListening = useCallback(async () => {
-                 try {
-                    streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    if (samplesToBufferAfterShotRef.current > 0) {
+                        shotWaveformBufferRef.current.push(...inputData);
+                        samplesToBufferAfterShotRef.current -= inputData.length;
+                        if (samplesToBufferAfterShotRef.current <= 0) {
+                            const { timeElapsed, dist, firstPeakIndexInBuffer, secondPeakIndexInBuffer } = shotToProcessRef.current;
+                            const speedInMs = dist / timeElapsed;
+                            const fullWaveform = new Float32Array(shotWaveformBufferRef.current);
+                            const peakMidpointInSamples = firstPeakIndexInBuffer + ((secondPeakIndexInBuffer - firstPeakIndexInBuffer) / 2);
+                            const displayWidthInSamples = Math.floor(sampleRateRef.current * GRAPH_TIME_WINDOW_S);
+                            let startIndex = Math.floor(peakMidpointInSamples - (displayWidthInSamples / 2));
+                            let endIndex = startIndex + displayWidthInSamples;
+                            if (startIndex < 0) { startIndex = 0; endIndex = displayWidthInSamples; }
+                            if (endIndex > fullWaveform.length) { endIndex = fullWaveform.length; startIndex = Math.max(0, endIndex - displayWidthInSamples); }
+
+                            const croppedWaveform = fullWaveform.slice(startIndex, endIndex);
+                            const newPeak1Index = firstPeakIndexInBuffer - startIndex;
+                            const newPeak2Index = secondPeakIndexInBuffer - startIndex;
+                            const newShot = { speed: speedInMs, timeElapsed, waveformData: Array.from(croppedWaveform), peak1Index: newPeak1Index, peak2Index: newPeak2Index };
+                            
+                            setCurrentShot(newShot);
+                            setSessionShots(prev => [...prev, newShot]);
+                            lastShotDisplayRef.current = { waveformData: croppedWaveform, peak1Index: newPeak1Index, peak2Index: newPeak2Index };
+                            drawShotWaveform(croppedWaveform, newPeak1Index, newPeak2Index);
+
+                            shotToProcessRef.current = null;
+                            firstPeakIndexRef.current = null;
+                            shotWaveformBufferRef.current = [];
+                        }
+                    } else {
+                        let peakInChunkIndex = -1, peakVal = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            const absVal = Math.abs(inputData[i]);
+                            if (absVal > PEAK_DETECTION_THRESHOLD && absVal > peakVal) {
+                                peakInChunkIndex = i;
+                                peakVal = absVal;
+                            }
+                        }
+                        if (peakInChunkIndex !== -1) {
+                            const absolutePeakIndex = currentSampleOffset + peakInChunkIndex;
+                            if (firstPeakIndexRef.current === null) {
+                                firstPeakIndexRef.current = absolutePeakIndex;
+                                shotWaveformBufferRef.current.push(...inputData.slice(peakInChunkIndex));
+                            } else {
+                                shotWaveformBufferRef.current.push(...inputData);
+                                const timeElapsed = (absolutePeakIndex - firstPeakIndexRef.current) / sampleRateRef.current;
+                                if (timeElapsed > MIN_PEAK_SPACING_S && timeElapsed < MAX_PEAK_SPACING_S) {
+                                    const dist = parseFloat(distance);
+                                    shotToProcessRef.current = { timeElapsed, dist, firstPeakIndexInBuffer: 0, secondPeakIndexInBuffer: absolutePeakIndex - firstPeakIndexRef.current };
+                                    samplesToBufferAfterShotRef.current = sampleRateRef.current * 0.5;
+                                } else if (timeElapsed >= MAX_PEAK_SPACING_S) {
+                                    firstPeakIndexRef.current = absolutePeakIndex;
+                                    shotWaveformBufferRef.current = [...inputData.slice(peakInChunkIndex)];
+                                }
+                            }
+                        } else {
+                            if (firstPeakIndexRef.current !== null) {
+                                shotWaveformBufferRef.current.push(...inputData);
+                                if (((currentSampleOffset + inputData.length) - firstPeakIndexRef.current) / sampleRateRef.current > MAX_PEAK_SPACING_S) {
+                                    firstPeakIndexRef.current = null;
+                                    shotWaveformBufferRef.current = [];
+                                }
+                            }
+                        }
+                    }
+                    totalSamplesRef.current += inputData.length;
+                };
+                
+                gainNodeRef.current.connect(scriptProcessorRef.current);
+                scriptProcessorRef.current.connect(audioContextRef.current.destination);
+            }, [distance, status, totalTargetShots, sessionShots.length, drawShotWaveform]);
+
+            // Central effect to manage audio processing based on status
+            useEffect(() => {
+                if (status === Status.RECORDING) {
+                    startProcessing();
+                } else {
+                    stopProcessing();
+                }
+            }, [status, startProcessing, stopProcessing]);
+
+            const initializeAudio = useCallback(async () => {
+                try {
                     const context = new (window.AudioContext || window.webkitAudioContext)();
                     audioContextRef.current = context;
+
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+                    streamRef.current = stream;
                     sampleRateRef.current = context.sampleRate;
                     
-                    const source = context.createMediaStreamSource(streamRef.current);
+                    const source = context.createMediaStreamSource(stream);
                     const gainNode = context.createGain();
-                    gainNode.gain.value = gain;
+                    gainNode.gain.setValueAtTime(gain, context.currentTime);
                     gainNodeRef.current = gainNode;
-
+                    
                     const analyser = context.createAnalyser();
                     analyser.fftSize = 2048;
                     analyserNodeRef.current = analyser;
-
-                    const processor = context.createScriptProcessor(4096, 1, 1);
-                    scriptProcessorRef.current = processor;
                     
+                    scriptProcessorRef.current = context.createScriptProcessor(4096, 1, 1);
+
                     source.connect(gainNode);
                     gainNode.connect(analyser);
-                    gainNode.connect(processor);
-                    processor.connect(context.destination);
 
-                    animationFrameIdRef.current = requestAnimationFrame(drawLiveWaveform);
-
-                    processor.onaudioprocess = (e) => {
-                        const { sessionShotsLength, totalTargetShots } = processingStateRef.current;
-                        if (totalTargetShots > 0 && sessionShotsLength >= totalTargetShots) {
-                            return;
-                        }
-
-                        const inputData = e.inputBuffer.getChannelData(0);
-                        const currentSampleOffset = totalSamplesRef.current;
-
-                        if (samplesToBufferAfterShotRef.current > 0) {
-                            shotWaveformBufferRef.current.push(...inputData);
-                            samplesToBufferAfterShotRef.current -= inputData.length;
-
-                            if (samplesToBufferAfterShotRef.current <= 0) {
-                                const { timeElapsed, dist, firstPeakIndexInBuffer, secondPeakIndexInBuffer } = shotToProcessRef.current;
-                                const speedInMs = dist / timeElapsed;
-                                
-                                const fullWaveform = new Float32Array(shotWaveformBufferRef.current);
-
-                                const peakDistanceInSamples = secondPeakIndexInBuffer - firstPeakIndexInBuffer;
-                                const peakMidpointInSamples = firstPeakIndexInBuffer + (peakDistanceInSamples / 2);
-                                const displayWidthInSamples = Math.floor(sampleRateRef.current * GRAPH_TIME_WINDOW_S);
-                                
-                                let startIndex = Math.floor(peakMidpointInSamples - (displayWidthInSamples / 2));
-                                let endIndex = startIndex + displayWidthInSamples;
-
-                                if (startIndex < 0) {
-                                    startIndex = 0;
-                                    endIndex = displayWidthInSamples;
-                                }
-                                if (endIndex > fullWaveform.length) {
-                                    endIndex = fullWaveform.length;
-                                    startIndex = Math.max(0, endIndex - displayWidthInSamples);
-                                }
-
-                                const croppedWaveform = fullWaveform.slice(startIndex, endIndex);
-                                const newPeak1Index = firstPeakIndexInBuffer - startIndex;
-                                const newPeak2Index = secondPeakIndexInBuffer - startIndex;
-                                
-                                const newShot = {
-                                    speed: speedInMs,
-                                    timeElapsed,
-                                    waveformData: Array.from(croppedWaveform), // Store as plain array for JSON serialization
-                                    peak1Index: newPeak1Index,
-                                    peak2Index: newPeak2Index,
-                                };
-                                
-                                setCurrentShot(newShot);
-                                setSessionShots(prev => [...prev, newShot]);
-                                
-                                lastShotDisplayRef.current = {
-                                    waveformData: croppedWaveform,
-                                    peak1Index: newPeak1Index,
-                                    peak2Index: newPeak2Index,
-                                };
-
-                                drawShotWaveform(croppedWaveform, newPeak1Index, newPeak2Index);
-
-                                shotToProcessRef.current = null;
-                                firstPeakIndexRef.current = null;
-                                shotWaveformBufferRef.current = [];
-                            }
-                        } else {
-                            let peakInChunkIndex = -1;
-                            let peakVal = 0;
-                            for (let i = 0; i < inputData.length; i++) {
-                                const absVal = Math.abs(inputData[i]);
-                                if (absVal > PEAK_DETECTION_THRESHOLD && absVal > peakVal) {
-                                    peakInChunkIndex = i;
-                                    peakVal = absVal;
-                                }
-                            }
-
-                            if (peakInChunkIndex !== -1) {
-                                const absolutePeakIndex = currentSampleOffset + peakInChunkIndex;
-                                if (firstPeakIndexRef.current === null) {
-                                    firstPeakIndexRef.current = absolutePeakIndex;
-                                    shotWaveformBufferRef.current.push(...inputData.slice(peakInChunkIndex));
-                                } else {
-                                    shotWaveformBufferRef.current.push(...inputData);
-                                    const timeElapsed = (absolutePeakIndex - firstPeakIndexRef.current) / sampleRateRef.current;
-
-                                    if (timeElapsed > MIN_PEAK_SPACING_S && timeElapsed < MAX_PEAK_SPACING_S) {
-                                        const dist = parseFloat(distance);
-                                        const firstPeakIndexInBuffer = 0;
-                                        const secondPeakIndexInBuffer = absolutePeakIndex - firstPeakIndexRef.current;
-
-                                        shotToProcessRef.current = { timeElapsed, dist, firstPeakIndexInBuffer, secondPeakIndexInBuffer };
-                                        samplesToBufferAfterShotRef.current = sampleRateRef.current * 0.5;
-                                    } else if (timeElapsed >= MAX_PEAK_SPACING_S) {
-                                        firstPeakIndexRef.current = absolutePeakIndex;
-                                        shotWaveformBufferRef.current = [...inputData.slice(peakInChunkIndex)];
-                                    }
-                                }
-                            } else {
-                                if (firstPeakIndexRef.current !== null) {
-                                    shotWaveformBufferRef.current.push(...inputData);
-                                    const samplesSinceFirst = (currentSampleOffset + inputData.length) - firstPeakIndexRef.current;
-                                    if (samplesSinceFirst / sampleRateRef.current > MAX_PEAK_SPACING_S) {
-                                        firstPeakIndexRef.current = null;
-                                        shotWaveformBufferRef.current = [];
-                                    }
-                                }
-                            }
-                        }
-                        totalSamplesRef.current += inputData.length;
-                    };
+                    setMicInitialized(true);
                 } catch (err) {
-                    setError("Mikrofoon toegang geweier. Laat asseblief toegang toe.");
+                    console.error(err);
+                    setError("Mikrofoon toegang geweier. Laat asseblief toegang toe in jou blaaier se instellings.");
                     setStatus(Status.ERROR);
-                    stopAudio();
                 }
-            }, [distance, gain, stopAudio, drawShotWaveform, drawLiveWaveform]);
+            }, [gain]);
 
+            // Full audio system cleanup on component unmount
+            useEffect(() => {
+                return () => {
+                    if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+                    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                        audioContextRef.current.close();
+                    }
+                };
+            }, []);
+
+             useEffect(() => {
+                if (status === Status.RECORDING && totalTargetShots > 0 && sessionShots.length >= totalTargetShots) {
+                    setStatus(Status.ROUND_COMPLETE);
+                }
+            }, [sessionShots.length, totalTargetShots, status]);
+
+            // --- Session Control Handlers ---
             const startSession = useCallback(() => {
                 const distNum = parseFloat(distance);
                 const shotsNum = parseInt(shotsPerRound, 10);
                 if (isNaN(distNum) || distNum <= 0 || isNaN(shotsNum) || shotsNum <= 0) {
                     setError("Voer asseblief 'n geldige afstand en aantal pyle in.");
-                    setStatus(Status.ERROR);
-                    return;
+                    setStatus(Status.ERROR); return;
                 }
-                stopAudio();
                 setError('');
                 setCurrentShot({ speed: null, timeElapsed: null });
                 setSessionShots([]);
@@ -476,10 +475,7 @@
                 const canvas = canvasRef.current;
                 if (canvas) {
                     const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#9ca3af';
-                    ctx.font = '16px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#9ca3af'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                     ctx.fillText('Luister...', canvas.width / 2, canvas.height / 2);
                 }
                 
@@ -489,44 +485,33 @@
                 shotToProcessRef.current = null;
                 samplesToBufferAfterShotRef.current = 0;
                 setStatus(Status.RECORDING);
-                startListening();
-            }, [distance, shotsPerRound, stopAudio, startListening, clearCanvas]);
+            }, [distance, shotsPerRound, clearCanvas]);
 
             const saveSessionToHistory = useCallback(() => {
                 if (sessionShots.length > 0) {
                      const averageSpeed = sessionShots.reduce((acc, s) => acc + s.speed, 0) / sessionShots.length;
-                    const newEntry = {
-                        id: Date.now(),
-                        createdAt: new Date().toISOString(),
-                        distance: parseFloat(distance),
-                        averageSpeed: averageSpeed,
-                        shots: [...sessionShots],
-                    };
+                    const newEntry = { id: Date.now(), createdAt: new Date().toISOString(), distance: parseFloat(distance), averageSpeed: averageSpeed, shots: [...sessionShots] };
                     setHistory(prev => [newEntry, ...prev]);
                 }
             }, [sessionShots, distance]);
             
             const stopAndSave = useCallback(() => {
-                stopAudio();
                 saveSessionToHistory();
                 setStatus(Status.IDLE);
                 setSessionShots([]);
                 setTotalTargetShots(0);
                 setCurrentShot({ speed: null, timeElapsed: null });
-            }, [stopAudio, saveSessionToHistory]);
+            }, [saveSessionToHistory]);
             
             const handlePause = () => {
-                stopAudio();
                 setStatus(Status.PAUSED);
             };
 
             const handleContinue = () => {
                 setStatus(Status.RECORDING);
-                startListening();
             };
 
             const handleEndSession = () => {
-                stopAudio();
                 if(sessionShots.length > 0) saveSessionToHistory();
                 setSessionShots([]);
                 setTotalTargetShots(0);
@@ -541,22 +526,20 @@
                 const newTotalTarget = sessionShots.length + 1;
                 setTotalTargetShots(newTotalTarget);
                 setStatus(Status.RECORDING);
-                startListening();
             };
 
             const handleNextRound = () => {
                 const nextRoundSize = parseInt(shotsPerRound, 10);
                 if (isNaN(nextRoundSize) || nextRoundSize <= 0) {
-                    setError("Voer 'n geldige aantal pyle in vir die volgende rondte.");
-                    return;
+                    setError("Voer 'n geldige aantal pyle in vir die volgende rondte."); return;
                 }
                 setError('');
                 const newTotal = sessionShots.length + nextRoundSize;
                 setTotalTargetShots(newTotal);
                 setStatus(Status.RECORDING);
-                startListening();
             };
-
+            
+            // --- Editing and History Handlers ---
             const handleUnitCycle = () => setSpeedUnit(SPEED_UNITS[(SPEED_UNITS.indexOf(speedUnit) + 1) % SPEED_UNITS.length]);
             
             const handleEditShot = useCallback((sessionId, shotIndex) => {
@@ -565,20 +548,16 @@
                 if(!session) return;
                 const shot = session.shots[shotIndex];
                 if(!shot) return;
-
                 handleEndSession();
-                stopAudio();
-                
                 setDistance(session.distance.toString());
                 setEditedShotData({ ...shot });
                 setEditingShot({ sessionId, shotIndex });
                 drawShotWaveform(shot.waveformData, shot.peak1Index, shot.peak2Index);
-            }, [history, status, drawShotWaveform, stopAudio, handleEndSession]);
+            }, [history, status, drawShotWaveform, handleEndSession]);
             
             const handleSaveEdit = () => {
                 if (!editingShot || !editedShotData) return;
                 const { sessionId, shotIndex } = editingShot;
-                
                 const newHistory = history.map(session => {
                     if (session.id === sessionId) {
                         const newShots = [...session.shots];
@@ -589,121 +568,96 @@
                     return session;
                 });
                 setHistory(newHistory);
-                setEditingShot(null);
-                setEditedShotData(null);
-                clearCanvas();
+                setEditingShot(null); setEditedShotData(null); clearCanvas();
             };
 
             const handleConfirmDelete = () => {
                 if (!editingShot) return;
                 const { sessionId, shotIndex } = editingShot;
-
                 const newHistory = history.map(session => {
                     if (session.id === sessionId) {
                         const newShots = session.shots.filter((_, index) => index !== shotIndex);
-                        if (newShots.length === 0) {
-                            return null; // Mark for removal
-                        }
+                        if (newShots.length === 0) return null; // Mark for removal
                         const newAverageSpeed = newShots.reduce((acc, s) => acc + s.speed, 0) / newShots.length;
                         return { ...session, shots: newShots, averageSpeed: newAverageSpeed };
                     }
                     return session;
-                }).filter(Boolean); // Remove null entries
-
+                }).filter(Boolean);
                 setHistory(newHistory);
-                setShowDeleteConfirm(false);
-                setEditingShot(null);
-                setEditedShotData(null);
-                clearCanvas();
+                setShowDeleteConfirm(false); setEditingShot(null); setEditedShotData(null); clearCanvas();
             };
-
+            
+            // --- Canvas Interaction Handlers ---
             const getEventX = useCallback((e) => {
                 const clientX = e.touches?.[0]?.clientX ?? e.clientX;
                 if (clientX === undefined) return null;
-
                 const canvas = canvasRef.current;
                 if (!canvas) return null;
-                
                 const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                return (clientX - rect.left) * scaleX;
+                return (clientX - rect.left) * (canvas.width / rect.width);
             }, []);
 
             const handleCanvasPointerDown = useCallback((e) => {
                 if (!editingShot) return;
                 const x = getEventX(e);
                 if (x === null) return;
-
                 const { peak1Index, peak2Index, waveformData } = editedShotData;
-                const canvasWidth = canvasRef.current.width;
-                const x1 = (peak1Index / waveformData.length) * canvasWidth;
-                const x2 = (peak2Index / waveformData.length) * canvasWidth;
+                const x1 = (peak1Index / waveformData.length) * canvasRef.current.width;
+                const x2 = (peak2Index / waveformData.length) * canvasRef.current.width;
                 const hitbox = 20;
-
-                if (Math.abs(x - x1) < hitbox) {
-                    draggingPeakRef.current = 'peak1';
-                    setCanvasCursor('col-resize');
-                } else if (Math.abs(x - x2) < hitbox) {
-                    draggingPeakRef.current = 'peak2';
-                    setCanvasCursor('col-resize');
-                }
+                if (Math.abs(x - x1) < hitbox) draggingPeakRef.current = 'peak1';
+                else if (Math.abs(x - x2) < hitbox) draggingPeakRef.current = 'peak2';
+                if (draggingPeakRef.current) setCanvasCursor('col-resize');
             }, [editingShot, editedShotData, getEventX]);
 
             const handleCanvasPointerMove = useCallback((e) => {
                 if (!editingShot) return;
-                
-                if (draggingPeakRef.current && e.cancelable) {
-                    e.preventDefault();
-                }
-
+                if (draggingPeakRef.current && e.cancelable) e.preventDefault();
                 const x = getEventX(e);
                 if (x === null) return;
-
                 const { waveformData, peak1Index, peak2Index } = editedShotData;
                 const canvasWidth = canvasRef.current.width;
-
                 if (draggingPeakRef.current) {
-                    let newIndex = Math.round((x / canvasWidth) * waveformData.length);
-                    newIndex = Math.max(0, Math.min(waveformData.length - 1, newIndex));
-
-                    let newPeak1 = peak1Index;
-                    let newPeak2 = peak2Index;
-
-                    if (draggingPeakRef.current === 'peak1' && newIndex < peak2Index) {
-                        newPeak1 = newIndex;
-                    } else if (draggingPeakRef.current === 'peak2' && newIndex > peak1Index) {
-                        newPeak2 = newIndex;
-                    }
-                    
+                    let newIndex = Math.max(0, Math.min(waveformData.length - 1, Math.round((x / canvasWidth) * waveformData.length)));
+                    let newPeak1 = peak1Index, newPeak2 = peak2Index;
+                    if (draggingPeakRef.current === 'peak1' && newIndex < peak2Index) newPeak1 = newIndex;
+                    else if (draggingPeakRef.current === 'peak2' && newIndex > peak1Index) newPeak2 = newIndex;
                     if (newPeak1 !== peak1Index || newPeak2 !== peak2Index) {
                         const timePerSample = GRAPH_TIME_WINDOW_S / waveformData.length;
                         const newTimeElapsed = (newPeak2 - newPeak1) * timePerSample;
                         const dist = parseFloat(distance);
                         const newSpeed = (newTimeElapsed > 0 && dist > 0) ? dist / newTimeElapsed : 0;
-
                         const newEditedData = { ...editedShotData, peak1Index: newPeak1, peak2Index: newPeak2, timeElapsed: newTimeElapsed, speed: newSpeed };
                         setEditedShotData(newEditedData);
                         drawShotWaveform(newEditedData.waveformData, newEditedData.peak1Index, newEditedData.peak2Index);
                     }
-                } else { 
-                    const x1 = (peak1Index / waveformData.length) * canvasWidth;
-                    const x2 = (peak2Index / waveformData.length) * canvasWidth;
-                    const hitbox = 20;
-                    if (Math.abs(x - x1) < hitbox || Math.abs(x - x2) < hitbox) {
-                        setCanvasCursor('col-resize');
-                    } else {
-                        setCanvasCursor('auto');
-                    }
+                } else {
+                    const x1 = (peak1Index / waveformData.length) * canvasWidth, x2 = (peak2Index / waveformData.length) * canvasWidth;
+                    setCanvasCursor(Math.abs(x - x1) < 20 || Math.abs(x - x2) < 20 ? 'col-resize' : 'auto');
                 }
             }, [editingShot, editedShotData, distance, drawShotWaveform, getEventX]);
 
             const handleCanvasPointerUp = useCallback(() => {
                 if (draggingPeakRef.current) {
-                    draggingPeakRef.current = null;
-                    setCanvasCursor('auto');
+                    draggingPeakRef.current = null; setCanvasCursor('auto');
                 }
             }, []);
 
+            if (!micInitialized) {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center">
+                        <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-8 space-y-6">
+                             <h1 className="text-3xl font-bold text-cyan-400">Boogskiet Snelheid</h1>
+                             <p className="text-gray-300">Hierdie toepassing het toegang tot jou mikrofoon nodig om die spoed van jou pyle te meet.</p>
+                             <button onClick={initializeAudio} className="w-full text-white text-xl font-bold py-4 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-opacity-50 bg-green-600 hover:bg-green-700">
+                                Aktiveer Mikrofoon
+                            </button>
+                            {error && <p className="text-red-400 font-semibold pt-4">{error}</p>}
+                        </div>
+                    </div>
+                );
+            }
+            
             const speedToDisplay = editingShot ? editedShotData.speed : currentShot.speed;
             const timeElapsedToDisplay = editingShot ? editedShotData?.timeElapsed : currentShot?.timeElapsed;
             const currentSpeedDisplay = convertSpeed(speedToDisplay, speedUnit);
@@ -744,21 +698,12 @@
                                     height="75" 
                                     className="bg-gray-900 rounded-lg w-full"
                                     style={{ cursor: editingShot ? canvasCursor : 'default', touchAction: 'none' }}
-                                    onMouseDown={handleCanvasPointerDown}
-                                    onMouseMove={handleCanvasPointerMove}
-                                    onMouseUp={handleCanvasPointerUp}
-                                    onMouseLeave={handleCanvasPointerUp}
-                                    onTouchStart={handleCanvasPointerDown}
-                                    onTouchMove={handleCanvasPointerMove}
+                                    onMouseDown={handleCanvasPointerDown} onMouseMove={handleCanvasPointerMove} onMouseUp={handleCanvasPointerUp}
+                                    onMouseLeave={handleCanvasPointerUp} onTouchStart={handleCanvasPointerDown} onTouchMove={handleCanvasPointerMove}
                                     onTouchEnd={handleCanvasPointerUp}
                                 ></canvas>
                                  <div className="flex justify-between text-xs text-gray-400 px-1 mt-1">
-                                    <span>0.0s</span>
-                                    <span>0.1s</span>
-                                    <span>0.2s</span>
-                                    <span>0.3s</span>
-                                    <span>0.4s</span>
-                                    <span>0.5s</span>
+                                    <span>0.0s</span><span>0.1s</span><span>0.2s</span><span>0.3s</span><span>0.4s</span><span>0.5s</span>
                                 </div>
                             </div>
                            
@@ -766,22 +711,12 @@
                                 <>
                                     <div>
                                         <p className="text-sm text-gray-400 uppercase mb-1">Huidige Klank</p>
-                                        <canvas 
-                                            ref={liveCanvasRef} 
-                                            width="400" 
-                                            height="75" 
-                                            className="bg-gray-900 rounded-lg w-full"
-                                        ></canvas>
+                                        <canvas ref={liveCanvasRef} width="400" height="75" className="bg-gray-900 rounded-lg w-full"></canvas>
                                     </div>
                                     <div className="w-full pt-2">
                                         <label htmlFor="gain" className="block text-base font-medium text-gray-300 mb-2">Mikrofoon Versterking</label>
                                         <input
-                                            type="range"
-                                            id="gain"
-                                            min="0.1"
-                                            max="5"
-                                            step="0.1"
-                                            value={gain}
+                                            type="range" id="gain" min="0.1" max="5" step="0.1" value={gain}
                                             onChange={(e) => setGain(parseFloat(e.target.value))}
                                             className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                         />
@@ -801,24 +736,14 @@
                                     <div className="flex-1">
                                         <label htmlFor="distance" className="block text-base font-medium text-gray-300 mb-2">Afstand (m)</label>
                                         <input 
-                                            type="number" 
-                                            id="distance" 
-                                            value={distance} 
-                                            onChange={(e) => setDistance(e.target.value)} 
-                                            readOnly={isSessionActive}
+                                            type="number" id="distance" value={distance} onChange={(e) => setDistance(e.target.value)} readOnly={isSessionActive}
                                             className="w-full p-3 text-center text-xl bg-gray-700 border-2 border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition read-only:bg-gray-700/50 read-only:cursor-not-allowed" 
                                         />
                                     </div>
                                     <div className="flex-1">
-                                        <label htmlFor="shots" className="block text-base font-medium text-gray-300 mb-2">
-                                            Aantal Pyle
-                                        </label>
+                                        <label htmlFor="shots" className="block text-base font-medium text-gray-300 mb-2">Aantal Pyle</label>
                                         <input 
-                                            type="number" 
-                                            id="shots" 
-                                            value={shotsPerRound}
-                                            onChange={(e) => setShotsPerRound(e.target.value)}
-                                            readOnly={status === Status.RECORDING || status === Status.PAUSED || editingShot}
+                                            type="number" id="shots" value={shotsPerRound} onChange={(e) => setShotsPerRound(e.target.value)} readOnly={isSessionActive || editingShot}
                                             className="w-full p-3 text-center text-xl bg-gray-700 border-2 border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition read-only:bg-gray-700/50 read-only:cursor-not-allowed"
                                         />
                                     </div>
@@ -905,7 +830,7 @@
         const rootElement = document.getElementById('root');
         if (rootElement) {
             const root = ReactDOM.createRoot(rootElement);
-            root.render(<App />);
+            root.render(<ErrorBoundary><App /></ErrorBoundary>);
         }
     </script>
 </body>
