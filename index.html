@@ -2,7 +2,7 @@
 <html lang="af">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Boogskiet Snelheid</title>
 
     <!-- PWA and Mobile App Meta Tags -->
@@ -775,14 +775,14 @@
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="cursor-pointer" onClick={handleUnitCycle} title="Klik om eenhede te verander">
                                     <p className="text-sm text-gray-400 uppercase">{editingShot ? 'Gewysigde Spoed' : 'Huidige Spoed'}</p>
-                                    <p className="text-4xl font-bold text-white">{currentSpeedDisplay !== null ? currentSpeedDisplay.toFixed(2) : '--'}</p>
+                                    <p className="text-3xl sm:text-4xl font-bold text-white">{currentSpeedDisplay !== null ? currentSpeedDisplay.toFixed(2) : '--'}</p>
                                      <div className="flex justify-center space-x-2 mt-1 text-base">
                                         {SPEED_UNITS.map(unit => (<span key={unit} className={`font-semibold transition-colors ${speedUnit === unit ? 'text-cyan-400' : 'text-gray-500'}`}>{unit}</span>))}
                                     </div>
                                 </div>
                                 <div>
                                     <p className="text-sm text-gray-400 uppercase">Pyle Geskiet</p>
-                                    <p className="text-4xl font-bold text-white">{sessionShots.length}</p>
+                                    <p className="text-3xl sm:text-4xl font-bold text-white">{sessionShots.length}</p>
                                     <p className="text-base text-gray-300 mt-1 invisible">{speedUnit}</p>
                                 </div>
                             </div>
@@ -834,14 +834,14 @@
                         
                         {/* Group 3: Inputs and Action Buttons */}
                         <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
-                            <div className="flex gap-4">
+                            <div className="flex gap-2">
                                 <div className="flex-1">
                                     <label htmlFor="distance" className="block text-base font-medium text-gray-300 mb-2">Afstand (m)</label>
                                     <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
                                         <button
                                             onClick={() => setDistance(d => Math.max(1, (parseInt(d, 10) || 0) - 1).toString())}
                                             disabled={isSessionActive}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-3 text-xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verminder afstand"
                                         >-</button>
                                         <input 
@@ -849,12 +849,12 @@
                                             onChange={(e) => setDistance(e.target.value)}
                                             onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setDistance('1'); } }}
                                             readOnly={isSessionActive}
-                                            className="w-full p-3 text-center text-xl bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            className="w-full p-2 text-center text-lg bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
                                         <button
                                             onClick={() => setDistance(d => ((parseInt(d, 10) || 0) + 1).toString())}
                                             disabled={isSessionActive}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-3 text-xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verhoog afstand"
                                         >+</button>
                                     </div>
@@ -865,7 +865,7 @@
                                         <button
                                             onClick={() => setShotsPerRound(s => Math.max(1, (parseInt(s, 10) || 0) - 1).toString())}
                                             disabled={isSessionActive || editingShot}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-3 text-xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verminder aantal pyle"
                                         >-</button>
                                         <input 
@@ -873,12 +873,12 @@
                                             onChange={(e) => setShotsPerRound(e.target.value)}
                                             onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setShotsPerRound('1'); } }}
                                             readOnly={isSessionActive || editingShot}
-                                            className="w-full p-3 text-center text-xl bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            className="w-full p-2 text-center text-lg bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
                                         <button
                                             onClick={() => setShotsPerRound(s => ((parseInt(s, 10) || 0) + 1).toString())}
                                             disabled={isSessionActive || editingShot}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-3 text-xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verhoog aantal pyle"
                                         >+</button>
                                     </div>
@@ -921,14 +921,14 @@
                                     const convertedAvgSpeed = convertSpeed(session.averageSpeed, speedUnit);
                                     return (
                                     <details key={session.id} className="bg-gray-800 rounded-lg overflow-hidden animate-fade-in">
-                                        <summary className="p-4 cursor-pointer list-none flex justify-between items-center">
+                                        <summary className="p-3 sm:p-4 cursor-pointer list-none flex justify-between items-center">
                                             <div className="text-left">
                                                 <div className="text-xs text-gray-400">{new Date(session.createdAt).toLocaleDateString()}</div>
                                                 <div className="text-md font-semibold mt-1">{session.distance}m &middot; {session.shots.length} Pyle</div>
                                             </div>
                                             <div className="flex items-center text-right">
-                                                <div className="text-cyan-400 text-2xl font-bold">{convertedAvgSpeed !== null ? convertedAvgSpeed.toFixed(2) : '--'} {speedUnit}</div>
-                                                <div className="details-marker text-cyan-400 transform transition-transform duration-200 ml-4">&#x276F;</div>
+                                                <div className="text-cyan-400 text-xl sm:text-2xl font-bold">{convertedAvgSpeed !== null ? convertedAvgSpeed.toFixed(2) : '--'} {speedUnit}</div>
+                                                <div className="details-marker text-cyan-400 transform transition-transform duration-200 ml-2 sm:ml-4">&#x276F;</div>
                                             </div>
                                         </summary>
                                         <div className="bg-gray-900/50 p-4 border-t border-gray-700">
