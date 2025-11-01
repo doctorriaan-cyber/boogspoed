@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-title" content="Snelheid">
     <meta name="theme-color" content="#111827">
     <link rel="apple-touch-icon" href="cropped.png">
-    <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiQm9vZ3NraWV0IFNuZWxoZWlkIiwic2hvcnRfbmFtZSI6IlNuZWxoZWlkIiwiZGVzY3JpcHRpb24iOiJBIHNpbXBsZSBjaHJvbm9ncmFwaCBhcHBsaWNhdGlvbiB0aGF0IHVzZXMgdGhlIGRldmljZSdzIG1pY3JvcGhvbmUgdG8gbWVhc3VyZSB0aGUgc3BlZWQgb2YgYW4gYXJyb3cgYnkgZGV0ZWN0aW5nIHRoZSBzb3VuZCBvZiB0aGUgYm93IHNob3QgYW5kIHRoZSBhcnJvdydzIGltcGFjdCBvbiB0aGUgdGFyZ2V0LiIsInN0YXJ0X3VybCI6Ii4iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjMDMwNzEyIiwidGhlbWVfY29sb3IiOiIjMTExODIzIiwiaWNvbnMiOlt7InNyYyI6ImNyb3BwZWQucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9XX0=">
+    <link rel="manifest" href="/manifest.json">
     
     <!-- External Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -136,15 +136,33 @@
             const arrowSpeed = distanceMeters / tArrow;
             return arrowSpeed;
         };
+        
+        const getInitialSession = () => {
+            try {
+                const savedSession = localStorage.getItem('bowSpeedCurrentSession');
+                if (savedSession) {
+                    return JSON.parse(savedSession);
+                }
+            } catch (e) { console.error("Could not parse saved session", e); }
+            return null;
+        };
+        const initialSession = getInitialSession();
 
         const App = () => {
             const [micInitialized, setMicInitialized] = useState(false);
-            const [status, setStatus] = useState(Status.IDLE);
-            const [distance, setDistance] = useState(() => localStorage.getItem('bowSpeedDistance') || '10');
+            const [status, setStatus] = useState(() => {
+                if (initialSession?.status) {
+                    const { status } = initialSession;
+                    if (status === Status.RECORDING || status === Status.PAUSED) return Status.PAUSED;
+                    if (status === Status.ROUND_COMPLETE) return Status.ROUND_COMPLETE;
+                }
+                return Status.IDLE;
+            });
+            const [distance, setDistance] = useState(() => initialSession?.distance || localStorage.getItem('bowSpeedDistance') || '10');
             const [shotsPerRound, setShotsPerRound] = useState(() => localStorage.getItem('bowShotsPerRound') || '3');
             const [error, setError] = useState('');
-            const [sessionShots, setSessionShots] = useState([]);
-            const [totalTargetShots, setTotalTargetShots] = useState(0);
+            const [sessionShots, setSessionShots] = useState(() => initialSession?.sessionShots || []);
+            const [totalTargetShots, setTotalTargetShots] = useState(() => initialSession?.totalTargetShots || 0);
             const [currentShot, setCurrentShot] = useState({ speed: null, timeElapsed: null });
             const [gain, setGain] = useState(() => parseFloat(localStorage.getItem('bowSpeedGain') || '1'));
             
@@ -160,14 +178,12 @@
                     const parsedHistory = JSON.parse(savedHistory);
             
                     if (Array.isArray(parsedHistory)) {
-                        // Filter out any sessions that don't have a valid 'shots' array.
-                        // This prevents crashes from corrupt or outdated localStorage data.
                         return parsedHistory.filter(session => Array.isArray(session?.shots));
                     }
-                    return []; // If not an array, discard it.
+                    return [];
                 } catch (error) {
                     console.error("Could not load or parse history from local storage", error);
-                    localStorage.removeItem('bowSpeedHistory'); // Clear corrupt data.
+                    localStorage.removeItem('bowSpeedHistory');
                     return [];
                 }
             });
@@ -205,6 +221,19 @@
             }, [history, distance, shotsPerRound, speedUnit, gain]);
             
             useEffect(() => {
+                if ([Status.RECORDING, Status.PAUSED, Status.ROUND_COMPLETE].includes(status)) {
+                    const currentSession = { status, distance, sessionShots, totalTargetShots };
+                    try {
+                        localStorage.setItem('bowSpeedCurrentSession', JSON.stringify(currentSession));
+                    } catch (error) {
+                        console.error("Could not save current session", error);
+                    }
+                } else {
+                    localStorage.removeItem('bowSpeedCurrentSession');
+                }
+            }, [status, distance, sessionShots, totalTargetShots]);
+
+            useEffect(() => {
                 if (gainNodeRef.current && audioContextRef.current) {
                     gainNodeRef.current.gain.setValueAtTime(gain, audioContextRef.current.currentTime);
                 }
@@ -215,7 +244,6 @@
                     const dist = parseFloat(distance);
                     if (!isNaN(dist) && dist > 0 && editedShotData.timeElapsed > 0) {
                         const newSpeed = calculateSpeed(dist, editedShotData.timeElapsed);
-                        // Only update if the speed is different to avoid re-render loops
                         if (newSpeed !== editedShotData.speed) {
                            setEditedShotData(prev => ({ ...prev, speed: newSpeed }));
                         }
@@ -337,7 +365,6 @@
             }, []);
             
             const startSession = useCallback(() => {
-                // Resume audio context on user gesture if it's suspended
                 if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
                     audioContextRef.current.resume();
                 }
@@ -547,10 +574,16 @@
             }, [saveSessionToHistory]);
             
             const handlePause = () => {
+                 if (audioContextRef.current && audioContextRef.current.state === 'running') {
+                    audioContextRef.current.suspend();
+                }
                 setStatus(Status.PAUSED);
             };
 
             const handleContinue = () => {
+                if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                    audioContextRef.current.resume();
+                }
                 setStatus(Status.RECORDING);
             };
 
@@ -706,7 +739,7 @@
             const speedToDisplay = editingShot ? editedShotData.speed : currentShot.speed;
             const timeElapsedToDisplay = editingShot ? editedShotData?.timeElapsed : currentShot?.timeElapsed;
             const currentSpeedDisplay = convertSpeed(speedToDisplay, speedUnit);
-            const isSessionActive = status === Status.RECORDING || status === Status.PAUSED;
+            const isSessionActive = status === Status.RECORDING || status === Status.PAUSED || status === Status.ROUND_COMPLETE;
             
             return (
                 <div className="min-h-screen flex flex-col items-center p-4">
@@ -880,7 +913,7 @@
                                             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 text-sm">
                                                 {session.shots.map((shot, index) => {
                                                     const convertedShotSpeed = convertSpeed(shot.speed, speedUnit);
-                                                    const canEdit = status !== Status.RECORDING && status !== Status.PAUSED;
+                                                    const canEdit = status !== Status.RECORDING && status !== Status.PAUSED && status !== Status.ROUND_COMPLETE;
                                                     return (
                                                         <div key={index} onClick={() => canEdit && handleEditShot(session.id, index)} className={`bg-gray-700 p-2 rounded-md text-center ${canEdit ? 'cursor-pointer hover:bg-gray-600' : ''}`}>
                                                             <div className="text-xs text-gray-400">Pyl {index + 1}</div>
@@ -915,6 +948,19 @@
         if (rootElement) {
             const root = ReactDOM.createRoot(rootElement);
             root.render(<ErrorBoundary><App /></ErrorBoundary>);
+        }
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('ServiceWorker registration failed: ', error);
+                    });
+            });
         }
     </script>
 </body>
