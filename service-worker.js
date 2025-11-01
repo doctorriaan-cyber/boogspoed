@@ -1,9 +1,13 @@
-const CACHE_NAME = 'bow-speed-cache-v1';
+const CACHE_NAME = 'bow-speed-cache-v2';
 const urlsToCache = [
   '/',
   '/index.html',
   '/Untitled.png',
-  '/cropped.png'
+  '/cropped.png',
+  'https://cdn.tailwindcss.com',
+  'https://unpkg.com/react@18/umd/react.development.js',
+  'https://unpkg.com/react-dom@18/umd/react-dom.development.js',
+  'https://unpkg.com/@babel/standalone/babel.min.js'
 ];
 
 self.addEventListener('install', event => {
