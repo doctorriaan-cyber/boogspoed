@@ -188,6 +188,7 @@
                 }
             });
             const [speedUnit, setSpeedUnit] = useState(() => localStorage.getItem('bowSpeedUnit') || SPEED_UNITS[0]);
+            const [installPromptEvent, setInstallPromptEvent] = useState(null);
 
             const audioContextRef = useRef(null);
             const streamRef = useRef(null);
@@ -553,6 +554,29 @@
                     setStatus(Status.ROUND_COMPLETE);
                 }
             }, [sessionShots.length, totalTargetShots, status]);
+            
+            useEffect(() => {
+                const handleBeforeInstallPrompt = (e) => {
+                    e.preventDefault();
+                    setInstallPromptEvent(e);
+                };
+                const handleAppInstalled = () => {
+                    setInstallPromptEvent(null);
+                };
+                window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+                window.addEventListener('appinstalled', handleAppInstalled);
+                return () => {
+                    window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+                    window.removeEventListener('appinstalled', handleAppInstalled);
+                };
+            }, []);
+
+            const handleInstallClick = async () => {
+                if (!installPromptEvent) return;
+                installPromptEvent.prompt();
+                await installPromptEvent.userChoice;
+                setInstallPromptEvent(null);
+            };
 
             // --- Session Control Handlers ---
             const saveSessionToHistory = useCallback(() => {
@@ -928,6 +952,18 @@
                             </div>
                         </div>
                     )}
+
+                    {installPromptEvent && (
+                        <div className="w-full max-w-md mx-auto mt-4 mb-4">
+                            <button 
+                                onClick={handleInstallClick} 
+                                className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700"
+                            >
+                                Installeer
+                            </button>
+                        </div>
+                    )}
+                    
                     {showDeleteConfirm && (
                         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 animate-fade-in">
                             <div className="bg-gray-800 rounded-lg p-6 shadow-xl text-center">
