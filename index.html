@@ -2,7 +2,7 @@
 <html lang="af">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Boogskiet Snelheid</title>
 
     <!-- PWA and Mobile App Meta Tags -->
@@ -836,12 +836,12 @@
                         <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
                             <div className="flex gap-2">
                                 <div className="flex-1">
-                                    <label htmlFor="distance" className="block text-base font-medium text-gray-300 mb-2">Afstand (m)</label>
+                                    <label htmlFor="distance" className="block text-xs font-medium text-gray-300 mb-2">Afstand (m)</label>
                                     <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
                                         <button
                                             onClick={() => setDistance(d => Math.max(1, (parseInt(d, 10) || 0) - 1).toString())}
                                             disabled={isSessionActive}
-                                            className="px-3 text-xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-2 text-lg font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verminder afstand"
                                         >-</button>
                                         <input 
@@ -849,23 +849,23 @@
                                             onChange={(e) => setDistance(e.target.value)}
                                             onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setDistance('1'); } }}
                                             readOnly={isSessionActive}
-                                            className="w-full p-2 text-center text-lg bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            className="w-full p-1.5 text-center text-base bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
                                         <button
                                             onClick={() => setDistance(d => ((parseInt(d, 10) || 0) + 1).toString())}
                                             disabled={isSessionActive}
-                                            className="px-3 text-xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-2 text-lg font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verhoog afstand"
                                         >+</button>
                                     </div>
                                 </div>
                                 <div className="flex-1">
-                                    <label htmlFor="shots" className="block text-base font-medium text-gray-300 mb-2">Aantal Pyle</label>
+                                    <label htmlFor="shots" className="block text-xs font-medium text-gray-300 mb-2">Aantal Pyle</label>
                                     <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive || editingShot ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
                                         <button
                                             onClick={() => setShotsPerRound(s => Math.max(1, (parseInt(s, 10) || 0) - 1).toString())}
                                             disabled={isSessionActive || editingShot}
-                                            className="px-3 text-xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-2 text-lg font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verminder aantal pyle"
                                         >-</button>
                                         <input 
@@ -873,12 +873,12 @@
                                             onChange={(e) => setShotsPerRound(e.target.value)}
                                             onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setShotsPerRound('1'); } }}
                                             readOnly={isSessionActive || editingShot}
-                                            className="w-full p-2 text-center text-lg bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            className="w-full p-1.5 text-center text-base bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
                                         <button
                                             onClick={() => setShotsPerRound(s => ((parseInt(s, 10) || 0) + 1).toString())}
                                             disabled={isSessionActive || editingShot}
-                                            className="px-3 text-xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            className="px-2 text-lg font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
                                             aria-label="Verhoog aantal pyle"
                                         >+</button>
                                     </div>
