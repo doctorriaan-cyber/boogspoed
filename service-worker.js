@@ -1,7 +1,6 @@
-const CACHE_NAME = 'bow-speed-cache-v2';
+const CACHE_NAME = 'bow-speed-cache-v3';
 const urlsToCache = [
-  '/',
-  '/index.html',
+  '.',
   '/Untitled.png',
   '/cropped.png',
   'https://cdn.tailwindcss.com',
