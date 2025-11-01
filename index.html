@@ -767,11 +767,12 @@
             
             return (
                 <div className="min-h-screen flex flex-col items-center p-4">
-                    <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6 text-center">
-                        <img src="Untitled.png" alt="Boogskiet Snelheid" className="w-full mx-auto" />
-
-                        <div className="bg-gray-700 p-4 rounded-xl">
-                             <div className="grid grid-cols-2 gap-4">
+                    <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-4 text-center">
+                        <img src="Untitled.png" alt="Boogskiet Snelheid" className="w-3/4 mx-auto mb-2" />
+                        
+                        {/* Group 1: Speed, Arrow Count, Shot Waveform */}
+                        <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
                                 <div className="cursor-pointer" onClick={handleUnitCycle} title="Klik om eenhede te verander">
                                     <p className="text-sm text-gray-400 uppercase">{editingShot ? 'Gewysigde Spoed' : 'Huidige Spoed'}</p>
                                     <p className="text-4xl font-bold text-white">{currentSpeedDisplay !== null ? currentSpeedDisplay.toFixed(2) : '--'}</p>
@@ -785,9 +786,7 @@
                                     <p className="text-base text-gray-300 mt-1 invisible">{speedUnit}</p>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="space-y-4">
                             <div>
                                 <p className="text-sm text-gray-400 uppercase mb-1">
                                      {timeElapsedToDisplay && timeElapsedToDisplay > 0
@@ -808,110 +807,110 @@
                                     <span>0.0s</span><span>0.1s</span><span>0.2s</span><span>0.3s</span><span>0.4s</span><span>0.5s</span>
                                 </div>
                             </div>
-                           
-                            {!editingShot ? (
-                                <>
-                                    <div>
-                                        <p className="text-sm text-gray-400 uppercase mb-1">Huidige Klank</p>
-                                        <canvas ref={liveCanvasRef} width="400" height="75" className="bg-gray-900 rounded-lg w-full"></canvas>
-                                    </div>
-                                    <div className="w-full pt-2">
-                                        <label htmlFor="gain" className="block text-base font-medium text-gray-300 mb-2">Mikrofoon Versterking</label>
-                                        <input
-                                            type="range" id="gain" min="0.1" max="5" step="0.1" value={gain}
-                                            onChange={(e) => setGain(parseFloat(e.target.value))}
-                                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                                        />
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="grid grid-cols-2 gap-4 pt-4">
-                                    <button onClick={handleSaveEdit} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Stoor</button>
-                                    <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-700">Verwyder</button>
-                                </div>
-                            )}
                         </div>
                         
-                        <div className="w-full space-y-4 pt-2">
-                             <div className="space-y-4">
-                                <div className="flex gap-4">
-                                    <div className="flex-1">
-                                        <label htmlFor="distance" className="block text-base font-medium text-gray-300 mb-2">Afstand (m)</label>
-                                        <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
-                                            <button
-                                                onClick={() => setDistance(d => Math.max(1, (parseInt(d, 10) || 0) - 1).toString())}
-                                                disabled={isSessionActive}
-                                                className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                                aria-label="Verminder afstand"
-                                            >-</button>
-                                            <input 
-                                                type="number" id="distance" value={distance} 
-                                                onChange={(e) => setDistance(e.target.value)}
-                                                onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setDistance('1'); } }}
-                                                readOnly={isSessionActive}
-                                                className="w-full p-3 text-center text-xl bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                            />
-                                            <button
-                                                onClick={() => setDistance(d => ((parseInt(d, 10) || 0) + 1).toString())}
-                                                disabled={isSessionActive}
-                                                className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                                aria-label="Verhoog afstand"
-                                            >+</button>
-                                        </div>
+                        {/* Group 2: Live Audio, Mic Gain OR Edit Buttons */}
+                        {!editingShot ? (
+                            <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                                <div>
+                                    <p className="text-sm text-gray-400 uppercase mb-1">Huidige Klank</p>
+                                    <canvas ref={liveCanvasRef} width="400" height="75" className="bg-gray-900 rounded-lg w-full"></canvas>
+                                </div>
+                                <div>
+                                    <label htmlFor="gain" className="block text-base font-medium text-gray-300 mb-2">Mikrofoon Versterking</label>
+                                    <input
+                                        type="range" id="gain" min="0.1" max="5" step="0.1" value={gain}
+                                        onChange={(e) => setGain(parseFloat(e.target.value))}
+                                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl grid grid-cols-2 gap-4">
+                                <button onClick={handleSaveEdit} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Stoor</button>
+                                <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-700">Verwyder</button>
+                            </div>
+                        )}
+                        
+                        {/* Group 3: Inputs and Action Buttons */}
+                        <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                            <div className="flex gap-4">
+                                <div className="flex-1">
+                                    <label htmlFor="distance" className="block text-base font-medium text-gray-300 mb-2">Afstand (m)</label>
+                                    <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
+                                        <button
+                                            onClick={() => setDistance(d => Math.max(1, (parseInt(d, 10) || 0) - 1).toString())}
+                                            disabled={isSessionActive}
+                                            className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            aria-label="Verminder afstand"
+                                        >-</button>
+                                        <input 
+                                            type="number" id="distance" value={distance} 
+                                            onChange={(e) => setDistance(e.target.value)}
+                                            onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setDistance('1'); } }}
+                                            readOnly={isSessionActive}
+                                            className="w-full p-3 text-center text-xl bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        />
+                                        <button
+                                            onClick={() => setDistance(d => ((parseInt(d, 10) || 0) + 1).toString())}
+                                            disabled={isSessionActive}
+                                            className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            aria-label="Verhoog afstand"
+                                        >+</button>
                                     </div>
-                                    <div className="flex-1">
-                                        <label htmlFor="shots" className="block text-base font-medium text-gray-300 mb-2">Aantal Pyle</label>
-                                        <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive || editingShot ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
-                                            <button
-                                                onClick={() => setShotsPerRound(s => Math.max(1, (parseInt(s, 10) || 0) - 1).toString())}
-                                                disabled={isSessionActive || editingShot}
-                                                className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                                aria-label="Verminder aantal pyle"
-                                            >-</button>
-                                            <input 
-                                                type="number" id="shots" value={shotsPerRound} 
-                                                onChange={(e) => setShotsPerRound(e.target.value)}
-                                                onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setShotsPerRound('1'); } }}
-                                                readOnly={isSessionActive || editingShot}
-                                                className="w-full p-3 text-center text-xl bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                            />
-                                            <button
-                                                onClick={() => setShotsPerRound(s => ((parseInt(s, 10) || 0) + 1).toString())}
-                                                disabled={isSessionActive || editingShot}
-                                                className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                                aria-label="Verhoog aantal pyle"
-                                            >+</button>
+                                </div>
+                                <div className="flex-1">
+                                    <label htmlFor="shots" className="block text-base font-medium text-gray-300 mb-2">Aantal Pyle</label>
+                                    <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive || editingShot ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
+                                        <button
+                                            onClick={() => setShotsPerRound(s => Math.max(1, (parseInt(s, 10) || 0) - 1).toString())}
+                                            disabled={isSessionActive || editingShot}
+                                            className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            aria-label="Verminder aantal pyle"
+                                        >-</button>
+                                        <input 
+                                            type="number" id="shots" value={shotsPerRound} 
+                                            onChange={(e) => setShotsPerRound(e.target.value)}
+                                            onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setShotsPerRound('1'); } }}
+                                            readOnly={isSessionActive || editingShot}
+                                            className="w-full p-3 text-center text-xl bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        />
+                                        <button
+                                            onClick={() => setShotsPerRound(s => ((parseInt(s, 10) || 0) + 1).toString())}
+                                            disabled={isSessionActive || editingShot}
+                                            className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                            aria-label="Verhoog aantal pyle"
+                                        >+</button>
+                                    </div>
+                                </div>
+                            </div>
+                            {status === Status.IDLE || status === Status.ERROR ? (
+                                <button onClick={startSession} className="w-full flex items-center justify-center text-white text-xl font-bold py-4 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-opacity-50 bg-green-600 hover:bg-green-700">
+                                    Begin
+                                </button>
+                             ) : status === Status.RECORDING || status === Status.PAUSED ? (
+                                <div className="grid grid-cols-2 gap-4">
+                                    {status === Status.RECORDING ? (
+                                        <button onClick={handlePause} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-yellow-600 hover:bg-yellow-700">Pouse</button>
+                                    ) : (
+                                        <button onClick={handleContinue} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">Gaan Voort</button>
+                                    )}
+                                    <button onClick={stopAndSave} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-600">Stop en Stoor</button>
+                                </div>
+                             ) : status === Status.ROUND_COMPLETE && (
+                                <div className="text-center">
+                                    <p className="text-lg text-gray-300 mb-4">Rondte Voltooi!</p>
+                                    <div className="space-y-3">
+                                        <button onClick={handleNextRound} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Volgende {shotsPerRound} pyle</button>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button onClick={handleAddOneShot} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">+1</button>
+                                            <button onClick={handleEndSession} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-gray-600 hover:bg-gray-700">Eindig</button>
                                         </div>
                                     </div>
                                 </div>
-                                {status === Status.IDLE || status === Status.ERROR ? (
-                                    <button onClick={startSession} className="w-full flex items-center justify-center text-white text-xl font-bold py-4 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-opacity-50 bg-green-600 hover:bg-green-700">
-                                        Begin
-                                    </button>
-                                 ) : status === Status.RECORDING || status === Status.PAUSED ? (
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {status === Status.RECORDING ? (
-                                            <button onClick={handlePause} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-yellow-600 hover:bg-yellow-700">Pouse</button>
-                                        ) : (
-                                            <button onClick={handleContinue} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">Gaan Voort</button>
-                                        )}
-                                        <button onClick={stopAndSave} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-600">Stop en Stoor</button>
-                                    </div>
-                                 ) : status === Status.ROUND_COMPLETE && (
-                                    <div className="text-center">
-                                        <p className="text-lg text-gray-300 mb-4">Rondte Voltooi!</p>
-                                        <div className="space-y-3">
-                                            <button onClick={handleNextRound} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Volgende {shotsPerRound} pyle</button>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <button onClick={handleAddOneShot} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">+1</button>
-                                                <button onClick={handleEndSession} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-gray-600 hover:bg-gray-700">Eindig</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                 )}
-                             </div>
-                             {error && <p className="text-red-400 font-semibold pt-2">{error}</p>}
+                             )}
                         </div>
+                        {error && <p className="text-red-400 font-semibold pt-2">{error}</p>}
                     </div>
                     
                     {history.length > 0 && (
