@@ -137,32 +137,51 @@
             return arrowSpeed;
         };
         
-        const getInitialSession = () => {
+        const getInitialState = () => {
+            let history = [];
             try {
-                const savedSession = localStorage.getItem('bowSpeedCurrentSession');
-                if (savedSession) {
-                    return JSON.parse(savedSession);
+                const savedHistory = localStorage.getItem('bowSpeedHistory');
+                if (savedHistory) {
+                    const parsedHistory = JSON.parse(savedHistory);
+                    if (Array.isArray(parsedHistory)) {
+                        history = parsedHistory.filter(session => Array.isArray(session?.shots));
+                    }
                 }
-            } catch (e) { console.error("Could not parse saved session", e); }
-            return null;
+            } catch (e) { console.error("Could not load or parse history", e); }
+
+            if (history.length > 0 && history[0].active) {
+                const activeSession = history[0];
+                return {
+                    history: history,
+                    status: Status.PAUSED,
+                    distance: activeSession.distance.toString(),
+                    shotsPerRound: localStorage.getItem('bowShotsPerRound') || '3',
+                    sessionShots: activeSession.shots || [],
+                    totalTargetShots: activeSession.totalTargetShots || 0,
+                };
+            }
+
+            return {
+                history: history,
+                status: Status.IDLE,
+                distance: localStorage.getItem('bowSpeedDistance') || '10',
+                shotsPerRound: localStorage.getItem('bowShotsPerRound') || '3',
+                sessionShots: [],
+                totalTargetShots: 0,
+            };
         };
-        const initialSession = getInitialSession();
 
         const App = () => {
             const [micInitialized, setMicInitialized] = useState(false);
-            const [status, setStatus] = useState(() => {
-                if (initialSession?.status) {
-                    const { status } = initialSession;
-                    if (status === Status.RECORDING || status === Status.PAUSED) return Status.PAUSED;
-                    if (status === Status.ROUND_COMPLETE) return Status.ROUND_COMPLETE;
-                }
-                return Status.IDLE;
-            });
-            const [distance, setDistance] = useState(() => initialSession?.distance || localStorage.getItem('bowSpeedDistance') || '10');
-            const [shotsPerRound, setShotsPerRound] = useState(() => localStorage.getItem('bowShotsPerRound') || '3');
+            
+            const [initialState] = useState(getInitialState());
+
+            const [status, setStatus] = useState(initialState.status);
+            const [distance, setDistance] = useState(initialState.distance);
+            const [shotsPerRound, setShotsPerRound] = useState(initialState.shotsPerRound);
             const [error, setError] = useState('');
-            const [sessionShots, setSessionShots] = useState(() => initialSession?.sessionShots || []);
-            const [totalTargetShots, setTotalTargetShots] = useState(() => initialSession?.totalTargetShots || 0);
+            const [sessionShots, setSessionShots] = useState(initialState.sessionShots);
+            const [totalTargetShots, setTotalTargetShots] = useState(initialState.totalTargetShots);
             const [currentShot, setCurrentShot] = useState({ speed: null, timeElapsed: null });
             const [gain, setGain] = useState(() => parseFloat(localStorage.getItem('bowSpeedGain') || '1'));
             
@@ -171,22 +190,7 @@
             const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
             const [canvasCursor, setCanvasCursor] = useState('auto');
             
-            const [history, setHistory] = useState(() => {
-                try {
-                    const savedHistory = localStorage.getItem('bowSpeedHistory');
-                    if (!savedHistory) return [];
-                    const parsedHistory = JSON.parse(savedHistory);
-            
-                    if (Array.isArray(parsedHistory)) {
-                        return parsedHistory.filter(session => Array.isArray(session?.shots));
-                    }
-                    return [];
-                } catch (error) {
-                    console.error("Could not load or parse history from local storage", error);
-                    localStorage.removeItem('bowSpeedHistory');
-                    return [];
-                }
-            });
+            const [history, setHistory] = useState(initialState.history);
             const [speedUnit, setSpeedUnit] = useState(() => localStorage.getItem('bowSpeedUnit') || SPEED_UNITS[0]);
             const [installPromptEvent, setInstallPromptEvent] = useState(null);
 
@@ -207,6 +211,8 @@
             const samplesToBufferAfterShotRef = useRef(0);
             const lastShotDisplayRef = useRef(null);
             const draggingPeakRef = useRef(null);
+            
+            const isSessionActive = status === Status.RECORDING || status === Status.PAUSED || status === Status.ROUND_COMPLETE;
 
             // --- Local Storage and State Syncing ---
             useEffect(() => {
@@ -218,21 +224,36 @@
                     localStorage.setItem('bowSpeedGain', gain);
                 } catch (error) {
                     console.error("Could not save to local storage", error);
+                    setError("Kon nie data stoor nie. Jou toestel se stoorplek is dalk vol.");
+                    setStatus(Status.ERROR);
                 }
             }, [history, distance, shotsPerRound, speedUnit, gain]);
             
+            // This effect syncs the active session in history with the current state
             useEffect(() => {
-                if ([Status.RECORDING, Status.PAUSED, Status.ROUND_COMPLETE].includes(status)) {
-                    const currentSession = { status, distance, sessionShots, totalTargetShots };
-                    try {
-                        localStorage.setItem('bowSpeedCurrentSession', JSON.stringify(currentSession));
-                    } catch (error) {
-                        console.error("Could not save current session", error);
+                if (!isSessionActive) return;
+
+                setHistory(prevHistory => {
+                    const newHistory = [...prevHistory];
+                    const activeSessionIndex = newHistory.findIndex(s => s.active);
+                    
+                    if (activeSessionIndex !== -1) {
+                        const activeSession = { ...newHistory[activeSessionIndex] };
+                        
+                        const validShots = sessionShots.filter(s => s.speed !== null && s.speed > 0);
+                        const newAverageSpeed = validShots.length > 0 ? validShots.reduce((acc, s) => acc + s.speed, 0) / validShots.length : 0;
+
+                        activeSession.shots = sessionShots;
+                        activeSession.averageSpeed = newAverageSpeed;
+                        activeSession.totalTargetShots = totalTargetShots;
+
+                        newHistory[activeSessionIndex] = activeSession;
+                        return newHistory;
                     }
-                } else {
-                    localStorage.removeItem('bowSpeedCurrentSession');
-                }
-            }, [status, distance, sessionShots, totalTargetShots]);
+                    return prevHistory;
+                });
+
+            }, [sessionShots, totalTargetShots, isSessionActive]);
 
             useEffect(() => {
                 if (gainNodeRef.current && audioContextRef.current) {
@@ -383,6 +404,17 @@
                 setEditingShot(null);
                 setEditedShotData(null);
                 
+                const newSession = {
+                    id: Date.now(),
+                    createdAt: new Date().toISOString(),
+                    distance: parseFloat(distance),
+                    totalTargetShots: shotsNum,
+                    shots: [],
+                    averageSpeed: 0,
+                    active: true
+                };
+                setHistory(prev => [newSession, ...prev]);
+
                 clearCanvas();
                 const canvas = canvasRef.current;
                 if (canvas) {
@@ -411,82 +443,89 @@
                 if (!scriptProcessorRef.current || !gainNodeRef.current || !audioContextRef.current) return;
                 
                 scriptProcessorRef.current.onaudioprocess = (e) => {
-                    if (status !== Status.RECORDING) return;
-                    if (totalTargetShots > 0 && sessionShots.length >= totalTargetShots) return;
+                    try {
+                        if (status !== Status.RECORDING) return;
+                        if (totalTargetShots > 0 && sessionShots.length >= totalTargetShots) return;
 
-                    const inputData = e.inputBuffer.getChannelData(0);
-                    const currentSampleOffset = totalSamplesRef.current;
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const currentSampleOffset = totalSamplesRef.current;
 
-                    if (samplesToBufferAfterShotRef.current > 0) {
-                        shotWaveformBufferRef.current.push(...inputData);
-                        samplesToBufferAfterShotRef.current -= inputData.length;
-                        if (samplesToBufferAfterShotRef.current <= 0) {
-                            const { timeElapsed, dist, firstPeakIndexInBuffer, secondPeakIndexInBuffer } = shotToProcessRef.current;
-                            const speedInMs = calculateSpeed(dist, timeElapsed);
-                            const fullWaveform = new Float32Array(shotWaveformBufferRef.current);
-                            const peakMidpointInSamples = firstPeakIndexInBuffer + ((secondPeakIndexInBuffer - firstPeakIndexInBuffer) / 2);
-                            const displayWidthInSamples = Math.floor(sampleRateRef.current * GRAPH_TIME_WINDOW_S);
-                            let startIndex = Math.floor(peakMidpointInSamples - (displayWidthInSamples / 2));
-                            let endIndex = startIndex + displayWidthInSamples;
-                            if (startIndex < 0) { startIndex = 0; endIndex = displayWidthInSamples; }
-                            if (endIndex > fullWaveform.length) { endIndex = fullWaveform.length; startIndex = Math.max(0, endIndex - displayWidthInSamples); }
+                        if (samplesToBufferAfterShotRef.current > 0) {
+                            shotWaveformBufferRef.current.push(...inputData);
+                            samplesToBufferAfterShotRef.current -= inputData.length;
+                            if (samplesToBufferAfterShotRef.current <= 0) {
+                                const { timeElapsed, dist, firstPeakIndexInBuffer, secondPeakIndexInBuffer } = shotToProcessRef.current;
+                                const speedInMs = calculateSpeed(dist, timeElapsed);
+                                const fullWaveform = new Float32Array(shotWaveformBufferRef.current);
+                                const peakMidpointInSamples = firstPeakIndexInBuffer + ((secondPeakIndexInBuffer - firstPeakIndexInBuffer) / 2);
+                                const displayWidthInSamples = Math.floor(sampleRateRef.current * GRAPH_TIME_WINDOW_S);
+                                let startIndex = Math.floor(peakMidpointInSamples - (displayWidthInSamples / 2));
+                                let endIndex = startIndex + displayWidthInSamples;
+                                if (startIndex < 0) { startIndex = 0; endIndex = displayWidthInSamples; }
+                                if (endIndex > fullWaveform.length) { endIndex = fullWaveform.length; startIndex = Math.max(0, endIndex - displayWidthInSamples); }
 
-                            const croppedWaveform = fullWaveform.slice(startIndex, endIndex);
-                            const newPeak1Index = firstPeakIndexInBuffer - startIndex;
-                            const newPeak2Index = secondPeakIndexInBuffer - startIndex;
-                            const newShot = { speed: speedInMs, timeElapsed, waveformData: Array.from(croppedWaveform), peak1Index: newPeak1Index, peak2Index: newPeak2Index };
-                            
-                            setCurrentShot(newShot);
-                            setSessionShots(prev => [...prev, newShot]);
-                            lastShotDisplayRef.current = { waveformData: croppedWaveform, peak1Index: newPeak1Index, peak2Index: newPeak2Index };
-                            drawShotWaveform(croppedWaveform, newPeak1Index, newPeak2Index);
+                                const croppedWaveform = fullWaveform.slice(startIndex, endIndex);
+                                const newPeak1Index = firstPeakIndexInBuffer - startIndex;
+                                const newPeak2Index = secondPeakIndexInBuffer - startIndex;
+                                const newShot = { speed: speedInMs, timeElapsed, waveformData: Array.from(croppedWaveform), peak1Index: newPeak1Index, peak2Index: newPeak2Index };
+                                
+                                setCurrentShot(newShot);
+                                setSessionShots(prev => [...prev, newShot]);
+                                lastShotDisplayRef.current = { waveformData: croppedWaveform, peak1Index: newPeak1Index, peak2Index: newPeak2Index };
+                                drawShotWaveform(croppedWaveform, newPeak1Index, newPeak2Index);
 
-                            shotToProcessRef.current = null;
-                            firstPeakIndexRef.current = null;
-                            shotWaveformBufferRef.current = [];
-                        }
-                    } else {
-                        let peakInChunkIndex = -1, peakVal = 0;
-                        for (let i = 0; i < inputData.length; i++) {
-                            const absVal = Math.abs(inputData[i]);
-                            if (absVal > PEAK_DETECTION_THRESHOLD && absVal > peakVal) {
-                                peakInChunkIndex = i;
-                                peakVal = absVal;
-                            }
-                        }
-                        if (peakInChunkIndex !== -1) {
-                            const absolutePeakIndex = currentSampleOffset + peakInChunkIndex;
-                            if (firstPeakIndexRef.current === null) {
-                                firstPeakIndexRef.current = absolutePeakIndex;
-                                shotWaveformBufferRef.current.push(...inputData.slice(peakInChunkIndex));
-                            } else {
-                                shotWaveformBufferRef.current.push(...inputData);
-                                const timeElapsed = (absolutePeakIndex - firstPeakIndexRef.current) / sampleRateRef.current;
-                                if (timeElapsed > MIN_PEAK_SPACING_S && timeElapsed < MAX_PEAK_SPACING_S) {
-                                    const dist = parseFloat(distance);
-                                    shotToProcessRef.current = { timeElapsed, dist, firstPeakIndexInBuffer: 0, secondPeakIndexInBuffer: absolutePeakIndex - firstPeakIndexRef.current };
-                                    samplesToBufferAfterShotRef.current = sampleRateRef.current * 0.5;
-                                } else if (timeElapsed >= MAX_PEAK_SPACING_S) {
-                                    firstPeakIndexRef.current = absolutePeakIndex;
-                                    shotWaveformBufferRef.current = [...inputData.slice(peakInChunkIndex)];
-                                }
+                                shotToProcessRef.current = null;
+                                firstPeakIndexRef.current = null;
+                                shotWaveformBufferRef.current = [];
                             }
                         } else {
-                            if (firstPeakIndexRef.current !== null) {
-                                shotWaveformBufferRef.current.push(...inputData);
-                                if (((currentSampleOffset + inputData.length) - firstPeakIndexRef.current) / sampleRateRef.current > MAX_PEAK_SPACING_S) {
-                                    firstPeakIndexRef.current = null;
-                                    shotWaveformBufferRef.current = [];
+                            let peakInChunkIndex = -1, peakVal = 0;
+                            for (let i = 0; i < inputData.length; i++) {
+                                const absVal = Math.abs(inputData[i]);
+                                if (absVal > PEAK_DETECTION_THRESHOLD && absVal > peakVal) {
+                                    peakInChunkIndex = i;
+                                    peakVal = absVal;
+                                }
+                            }
+                            if (peakInChunkIndex !== -1) {
+                                const absolutePeakIndex = currentSampleOffset + peakInChunkIndex;
+                                if (firstPeakIndexRef.current === null) {
+                                    firstPeakIndexRef.current = absolutePeakIndex;
+                                    shotWaveformBufferRef.current.push(...inputData.slice(peakInChunkIndex));
+                                } else {
+                                    shotWaveformBufferRef.current.push(...inputData);
+                                    const timeElapsed = (absolutePeakIndex - firstPeakIndexRef.current) / sampleRateRef.current;
+                                    if (timeElapsed > MIN_PEAK_SPACING_S && timeElapsed < MAX_PEAK_SPACING_S) {
+                                        const dist = parseFloat(distance);
+                                        shotToProcessRef.current = { timeElapsed, dist, firstPeakIndexInBuffer: 0, secondPeakIndexInBuffer: absolutePeakIndex - firstPeakIndexRef.current };
+                                        samplesToBufferAfterShotRef.current = sampleRateRef.current * 0.5;
+                                    } else if (timeElapsed >= MAX_PEAK_SPACING_S) {
+                                        firstPeakIndexRef.current = absolutePeakIndex;
+                                        shotWaveformBufferRef.current = [...inputData.slice(peakInChunkIndex)];
+                                    }
+                                }
+                            } else {
+                                if (firstPeakIndexRef.current !== null) {
+                                    shotWaveformBufferRef.current.push(...inputData);
+                                    if (((currentSampleOffset + inputData.length) - firstPeakIndexRef.current) / sampleRateRef.current > MAX_PEAK_SPACING_S) {
+                                        firstPeakIndexRef.current = null;
+                                        shotWaveformBufferRef.current = [];
+                                    }
                                 }
                             }
                         }
+                        totalSamplesRef.current += inputData.length;
+                    } catch (err) {
+                        console.error("Fout in oudioprosessering:", err);
+                        setStatus(Status.ERROR);
+                        setError("'n Onverwagte fout het voorgekom. Stop asseblief en begin oor.");
+                        stopProcessing();
                     }
-                    totalSamplesRef.current += inputData.length;
                 };
                 
                 gainNodeRef.current.connect(scriptProcessorRef.current);
                 scriptProcessorRef.current.connect(audioContextRef.current.destination);
-            }, [distance, status, totalTargetShots, sessionShots.length, drawShotWaveform]);
+            }, [distance, status, totalTargetShots, sessionShots.length, drawShotWaveform, stopProcessing]);
 
             // Central effect to manage audio processing based on status
             useEffect(() => {
@@ -579,23 +618,34 @@
             };
 
             // --- Session Control Handlers ---
-            const saveSessionToHistory = useCallback(() => {
-                if (sessionShots.length > 0) {
-                    const validShots = sessionShots.filter(s => s.speed !== null && s.speed > 0);
-                    if (validShots.length === 0) return; // Don't save a session with no valid shots
-                    const averageSpeed = validShots.reduce((acc, s) => acc + s.speed, 0) / validShots.length;
-                    const newEntry = { id: Date.now(), createdAt: new Date().toISOString(), distance: parseFloat(distance), averageSpeed: averageSpeed, shots: [...sessionShots] };
-                    setHistory(prev => [newEntry, ...prev]);
-                }
-            }, [sessionShots, distance]);
-            
-            const stopAndSave = useCallback(() => {
-                saveSessionToHistory();
+            const endAndFinalizeSession = useCallback(() => {
+                setHistory(prev => {
+                    const newHistory = [...prev];
+                    const activeSessionIndex = newHistory.findIndex(s => s.active);
+                    if (activeSessionIndex !== -1) {
+                        const sessionToFinalize = newHistory[activeSessionIndex];
+                        const hasValidShots = sessionToFinalize.shots.some(shot => shot.speed !== null && shot.speed > 0);
+                        
+                        if (hasValidShots) {
+                            newHistory[activeSessionIndex] = { ...sessionToFinalize, active: false };
+                        } else {
+                            // If no valid shots, remove the session entirely
+                            newHistory.splice(activeSessionIndex, 1);
+                        }
+                    }
+                    return newHistory;
+                });
+                
                 setStatus(Status.IDLE);
                 setSessionShots([]);
                 setTotalTargetShots(0);
                 setCurrentShot({ speed: null, timeElapsed: null });
-            }, [saveSessionToHistory]);
+                setEditingShot(null);
+                setEditedShotData(null);
+                clearCanvas();
+            }, [clearCanvas]);
+            
+            const stopAndSave = endAndFinalizeSession;
             
             const handlePause = () => {
                  if (audioContextRef.current && audioContextRef.current.state === 'running') {
@@ -611,16 +661,7 @@
                 setStatus(Status.RECORDING);
             };
 
-            const handleEndSession = () => {
-                if(sessionShots.length > 0) saveSessionToHistory();
-                setSessionShots([]);
-                setTotalTargetShots(0);
-                setCurrentShot({ speed: null, timeElapsed: null });
-                setStatus(Status.IDLE);
-                setEditingShot(null);
-                setEditedShotData(null);
-                clearCanvas();
-            };
+            const handleEndSession = endAndFinalizeSession;
 
             const handleAddOneShot = () => {
                 const newTotalTarget = sessionShots.length + 1;
@@ -643,17 +684,16 @@
             const handleUnitCycle = () => setSpeedUnit(SPEED_UNITS[(SPEED_UNITS.indexOf(speedUnit) + 1) % SPEED_UNITS.length]);
             
             const handleEditShot = useCallback((sessionId, shotIndex) => {
-                if(status === Status.RECORDING || status === Status.PAUSED) return;
+                if(isSessionActive) return;
                 const session = history.find(s => s.id === sessionId);
                 if(!session) return;
                 const shot = session.shots[shotIndex];
                 if(!shot) return;
-                handleEndSession();
                 setDistance(session.distance.toString());
                 setEditedShotData({ ...shot });
                 setEditingShot({ sessionId, shotIndex });
                 drawShotWaveform(shot.waveformData, shot.peak1Index, shot.peak2Index);
-            }, [history, status, drawShotWaveform, handleEndSession]);
+            }, [history, isSessionActive, drawShotWaveform]);
             
             const handleSaveEdit = () => {
                 if (!editingShot || !editedShotData) return;
@@ -763,7 +803,6 @@
             const speedToDisplay = editingShot ? editedShotData.speed : currentShot.speed;
             const timeElapsedToDisplay = editingShot ? editedShotData?.timeElapsed : currentShot?.timeElapsed;
             const currentSpeedDisplay = convertSpeed(speedToDisplay, speedUnit);
-            const isSessionActive = status === Status.RECORDING || status === Status.PAUSED || status === Status.ROUND_COMPLETE;
             
             return (
                 <div className="min-h-screen flex flex-col items-center p-4">
@@ -923,7 +962,11 @@
                                     <details key={session.id} className="bg-gray-800 rounded-lg overflow-hidden animate-fade-in">
                                         <summary className="p-3 sm:p-4 cursor-pointer list-none flex justify-between items-center">
                                             <div className="text-left">
-                                                <div className="text-xs text-gray-400">{new Date(session.createdAt).toLocaleDateString()}</div>
+                                                <div className="text-xs text-gray-400 flex items-center">
+                                                    {session.active && <span className="inline-block bg-green-500 rounded-full h-2 w-2 mr-2 animate-pulse"></span>}
+                                                    {new Date(session.createdAt).toLocaleDateString()}
+                                                    {session.active && <span className="text-green-400 font-bold ml-2 uppercase">Live</span>}
+                                                </div>
                                                 <div className="text-md font-semibold mt-1">{session.distance}m &middot; {session.shots.length} Pyle</div>
                                             </div>
                                             <div className="flex items-center text-right">
@@ -936,7 +979,7 @@
                                             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 text-sm">
                                                 {session.shots.map((shot, index) => {
                                                     const convertedShotSpeed = convertSpeed(shot.speed, speedUnit);
-                                                    const canEdit = status !== Status.RECORDING && status !== Status.PAUSED && status !== Status.ROUND_COMPLETE;
+                                                    const canEdit = !isSessionActive;
                                                     return (
                                                         <div key={index} onClick={() => canEdit && handleEditShot(session.id, index)} className={`bg-gray-700 p-2 rounded-md text-center ${canEdit ? 'cursor-pointer hover:bg-gray-600' : ''}`}>
                                                             <div className="text-xs text-gray-400">Pyl {index + 1}</div>
