@@ -1,5 +1,6 @@
+
 {
-  "name": "Copy of Boogskiet Snelheid",
+  "name": "Skerpskoot",
   "description": "A simple chronograph application that uses the device's microphone to measure the speed of an arrow by detecting the sound of the bow shot and the arrow's impact on the target.",
   "requestFramePermissions": [
     "microphone"
