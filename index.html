@@ -62,7 +62,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useCallback } = React;
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
         class ErrorBoundary extends React.Component {
             constructor(props) {
@@ -124,13 +124,9 @@
         const calculateSpeed = (distanceMeters, totalTimeSeconds) => {
             if (distanceMeters <= 0 || totalTimeSeconds <= 0) return null;
             
-            // Time for sound to travel from target to microphone
             const tSound = distanceMeters / SPEED_OF_SOUND_MS;
-            
-            // Time for arrow to travel to target
             const tArrow = totalTimeSeconds - tSound;
 
-            // If tArrow is non-positive, the measurement is invalid (e.g., faster than sound or an error)
             if (tArrow <= 0) return null;
             
             const arrowSpeed = distanceMeters / tArrow;
@@ -171,9 +167,154 @@
             };
         };
 
+        const DataInput = ({ label, unit, value, onChange, variableName }) => (
+            <div>
+                <label className="block text-xs font-medium text-gray-300 mb-2">{label} ({unit})</label>
+                <input 
+                    type="number"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    className="w-full p-2 text-center text-base bg-gray-700 border-2 border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <p className="text-xs font-mono text-cyan-400 mt-1">{variableName}</p>
+            </div>
+        );
+        
+        const MyDataPage = ({ setView, history, speedUnit, drawLength, setDrawLength, drawWeight, setDrawWeight, arrowMass, setArrowMass }) => {
+            const [localDrawLength, setLocalDrawLength] = useState(drawLength);
+            const [localDrawWeight, setLocalDrawWeight] = useState(drawWeight);
+            const [localArrowMass, setLocalArrowMass] = useState(arrowMass);
+
+            useEffect(() => {
+                setLocalDrawLength(drawLength);
+                setLocalDrawWeight(drawWeight);
+                setLocalArrowMass(arrowMass);
+            }, [drawLength, drawWeight, arrowMass]);
+            
+            const overallAverageSpeedMs = useMemo(() => {
+                const sessionsWithShots = history.filter(s => s.shots && s.shots.length > 0 && s.averageSpeed > 0);
+                if (sessionsWithShots.length === 0) return null;
+                const totalSpeed = sessionsWithShots.reduce((acc, s) => acc + s.averageSpeed, 0);
+                return totalSpeed / sessionsWithShots.length;
+            }, [history]);
+
+            const { theoreticalSpeed, actualEfficiency } = useMemo(() => {
+                const dl = parseFloat(drawLength); // meters
+                const dw = parseFloat(drawWeight); // lbs
+                const am = parseFloat(arrowMass); // grams
+
+                if (isNaN(dl) || isNaN(dw) || isNaN(am) || dl <= 0 || dw <= 0 || am <= 0) {
+                    return { theoreticalSpeed: null, actualEfficiency: null };
+                }
+
+                const drawWeightN = dw * 0.453592 * 9.81;
+                const arrowMassKg = am / 1000;
+                
+                const theoreticalSpeedMs = Math.sqrt((dl * drawWeightN * 0.8) / arrowMassKg);
+
+                let actualEfficiencyVal = null;
+                if (overallAverageSpeedMs && overallAverageSpeedMs > 0) {
+                    actualEfficiencyVal = (((overallAverageSpeedMs ** 2) * arrowMassKg) / (dl * drawWeightN)) * 100;
+                }
+
+                return {
+                    theoreticalSpeed: theoreticalSpeedMs,
+                    actualEfficiency: actualEfficiencyVal,
+                };
+            }, [drawLength, drawWeight, arrowMass, overallAverageSpeedMs]);
+
+            const handleUpdate = () => {
+                setDrawLength(localDrawLength);
+                setDrawWeight(localDrawWeight);
+                setArrowMass(localArrowMass);
+            };
+
+            const overallAverageSpeedConverted = convertSpeed(overallAverageSpeedMs, speedUnit);
+            const theoreticalSpeedConverted = convertSpeed(theoreticalSpeed, speedUnit);
+
+            return (
+                <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6 text-center relative animate-fade-in">
+                    <button onClick={() => setView('main')} className="absolute top-5 left-5 p-2 z-10 text-gray-400 hover:text-cyan-400 transition-colors" aria-label="Gaan Terug">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                    </button>
+                    
+                    <h1 className="text-2xl font-bold text-cyan-400">My Data</h1>
+
+                    <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl">
+                        <p className="text-sm text-gray-400 uppercase">Gemiddelde Spoed (Alle Sessies)</p>
+                        <p className="text-4xl font-bold text-white mt-1">{overallAverageSpeedConverted !== null ? overallAverageSpeedConverted.toFixed(2) : '--'} <span className="text-2xl text-gray-300">{speedUnit}</span></p>
+                    </div>
+
+                    <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                        <h2 className="text-lg font-semibold text-gray-200">My Inligting</h2>
+                        <div className="grid grid-cols-3 gap-3">
+                            <DataInput 
+                                label="Treklengte" 
+                                unit="m" 
+                                value={localDrawLength} 
+                                onChange={setLocalDrawLength} 
+                                variableName="dl" 
+                            />
+                            <DataInput 
+                                label="Trek gewig" 
+                                unit="lb" 
+                                value={localDrawWeight} 
+                                onChange={setLocalDrawWeight} 
+                                variableName="dw" 
+                            />
+                            <DataInput 
+                                label="Pylmassa" 
+                                unit="g" 
+                                value={localArrowMass} 
+                                onChange={setLocalArrowMass} 
+                                variableName="am" 
+                            />
+                        </div>
+                        <button 
+                            onClick={handleUpdate} 
+                            className="w-full mt-4 text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-cyan-600 hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                            Opdateer
+                        </button>
+                    </div>
+                    
+                    <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4 text-gray-200">
+                        <h2 className="text-lg font-semibold">Boog Berekeninge</h2>
+                        <div className="flex items-center justify-center space-x-2 text-lg font-mono p-2 bg-gray-900/50 rounded-md" role="math" aria-label="v equals the square root of (dl times dw times 0.8) divided by am">
+                            <span aria-hidden="true">v =</span>
+                            <div className="flex items-start" aria-hidden="true">
+                                <svg width="20" height="45" viewBox="0 0 20 45" className="flex-shrink-0 -mr-1">
+                                    <path d="M2 22 L7 32 L19 2" stroke="currentColor" strokeWidth="2.5" fill="none"/>
+                                </svg>
+                                <div className="flex flex-col text-center text-sm border-t-2 border-current pt-1">
+                                    <span className="px-2">dl × dw × 0.8</span>
+                                    <span className="border-b-2 border-current my-1 mx-2"></span>
+                                    <span className="px-2 pb-1">am</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                             <div className="bg-gray-900/50 p-3 rounded-lg">
+                                <p className="text-sm text-gray-400">Teoretiese Pyl Snelheid</p>
+                                <p className="text-2xl font-bold text-white mt-1">{theoreticalSpeedConverted !== null ? theoreticalSpeedConverted.toFixed(2) : '--'} <span className="text-lg text-gray-300">{speedUnit}</span></p>
+                             </div>
+                             <div className="bg-gray-900/50 p-3 rounded-lg">
+                                <p className="text-sm text-gray-400">Ware Kragomsetting</p>
+                                <p className="text-2xl font-bold text-white mt-1">{actualEfficiency !== null ? actualEfficiency.toFixed(1) : '--'}<span className="text-lg text-gray-300">%</span></p>
+                             </div>
+                        </div>
+                    </div>
+
+                </div>
+            );
+        };
+
+
         const App = () => {
             const [micInitialized, setMicInitialized] = useState(false);
-            
             const [initialState] = useState(getInitialState());
 
             const [status, setStatus] = useState(initialState.status);
@@ -193,6 +334,11 @@
             const [history, setHistory] = useState(initialState.history);
             const [speedUnit, setSpeedUnit] = useState(() => localStorage.getItem('bowSpeedUnit') || SPEED_UNITS[0]);
             const [installPromptEvent, setInstallPromptEvent] = useState(null);
+
+            const [view, setView] = useState('main');
+            const [drawLength, setDrawLength] = useState(() => localStorage.getItem('bowDrawLength') || '0.7');
+            const [drawWeight, setDrawWeight] = useState(() => localStorage.getItem('bowDrawWeight') || '50');
+            const [arrowMass, setArrowMass] = useState(() => localStorage.getItem('bowArrowMass') || '25');
 
             const audioContextRef = useRef(null);
             const streamRef = useRef(null);
@@ -214,7 +360,6 @@
             
             const isSessionActive = status === Status.RECORDING || status === Status.PAUSED || status === Status.ROUND_COMPLETE;
 
-            // --- Local Storage and State Syncing ---
             useEffect(() => {
                 try {
                     localStorage.setItem('bowSpeedHistory', JSON.stringify(history));
@@ -222,14 +367,16 @@
                     localStorage.setItem('bowShotsPerRound', shotsPerRound);
                     localStorage.setItem('bowSpeedUnit', speedUnit);
                     localStorage.setItem('bowSpeedGain', gain);
+                    localStorage.setItem('bowDrawLength', drawLength);
+                    localStorage.setItem('bowDrawWeight', drawWeight);
+                    localStorage.setItem('bowArrowMass', arrowMass);
                 } catch (error) {
                     console.error("Could not save to local storage", error);
                     setError("Kon nie data stoor nie. Jou toestel se stoorplek is dalk vol.");
                     setStatus(Status.ERROR);
                 }
-            }, [history, distance, shotsPerRound, speedUnit, gain]);
+            }, [history, distance, shotsPerRound, speedUnit, gain, drawLength, drawWeight, arrowMass]);
             
-            // This effect syncs the active session in history with the current state
             useEffect(() => {
                 if (!isSessionActive) return;
 
@@ -273,7 +420,6 @@
                 }
             }, [distance, editingShot, editedShotData]);
 
-            // --- Waveform Drawing ---
             const drawLiveWaveform = useCallback(() => {
                 if (!analyserNodeRef.current || !liveCanvasRef.current) {
                     animationFrameIdRef.current = requestAnimationFrame(drawLiveWaveform);
@@ -431,7 +577,6 @@
                 setStatus(Status.RECORDING);
             }, [distance, shotsPerRound, clearCanvas]);
 
-            // --- Audio Processing Logic ---
             const stopProcessing = useCallback(() => {
                 if (scriptProcessorRef.current) {
                     scriptProcessorRef.current.disconnect();
@@ -527,7 +672,6 @@
                 scriptProcessorRef.current.connect(audioContextRef.current.destination);
             }, [distance, status, totalTargetShots, sessionShots.length, drawShotWaveform, stopProcessing]);
 
-            // Central effect to manage audio processing based on status
             useEffect(() => {
                 if (status === Status.RECORDING) {
                     startProcessing();
@@ -578,7 +722,6 @@
                 }
             }, [initializeAudio, micInitialized]);
 
-            // Full audio system cleanup on component unmount
             useEffect(() => {
                 return () => {
                     if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
@@ -617,7 +760,6 @@
                 setInstallPromptEvent(null);
             };
 
-            // --- Session Control Handlers ---
             const endAndFinalizeSession = useCallback(() => {
                 setHistory(prev => {
                     const newHistory = [...prev];
@@ -629,7 +771,6 @@
                         if (hasValidShots) {
                             newHistory[activeSessionIndex] = { ...sessionToFinalize, active: false };
                         } else {
-                            // If no valid shots, remove the session entirely
                             newHistory.splice(activeSessionIndex, 1);
                         }
                     }
@@ -680,7 +821,6 @@
                 setStatus(Status.RECORDING);
             };
             
-            // --- Editing and History Handlers ---
             const handleUnitCycle = () => setSpeedUnit(SPEED_UNITS[(SPEED_UNITS.indexOf(speedUnit) + 1) % SPEED_UNITS.length]);
             
             const handleEditShot = useCallback((sessionId, shotIndex) => {
@@ -718,7 +858,7 @@
                 const newHistory = history.map(session => {
                     if (session.id === sessionId) {
                         const newShots = session.shots.filter((_, index) => index !== shotIndex);
-                        if (newShots.length === 0) return null; // Mark for removal
+                        if (newShots.length === 0) return null;
                         const validShots = newShots.filter(s => s.speed !== null && s.speed > 0);
                         const newAverageSpeed = validShots.length > 0 ? validShots.reduce((acc, s) => acc + s.speed, 0) / validShots.length : 0;
                         return { ...session, shots: newShots, averageSpeed: newAverageSpeed };
@@ -729,7 +869,6 @@
                 setShowDeleteConfirm(false); setEditingShot(null); setEditedShotData(null); clearCanvas();
             };
             
-            // --- Canvas Interaction Handlers ---
             const getEventX = useCallback((e) => {
                 const clientX = e.touches?.[0]?.clientX ?? e.clientX;
                 if (clientX === undefined) return null;
@@ -806,204 +945,220 @@
             
             return (
                 <div className="min-h-screen flex flex-col items-center p-4">
-                    <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-4 text-center">
-                        <img src="Untitled.png" alt="Skerpskoot" className="w-3/4 mx-auto mb-2" />
-                        
-                        {/* Group 1: Speed, Arrow Count, Shot Waveform */}
-                        <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="cursor-pointer" onClick={handleUnitCycle} title="Klik om eenhede te verander">
-                                    <p className="text-sm text-gray-400 uppercase">{editingShot ? 'Gewysigde Spoed' : 'Huidige Spoed'}</p>
-                                    <p className="text-3xl sm:text-4xl font-bold text-white">{currentSpeedDisplay !== null ? currentSpeedDisplay.toFixed(2) : '--'}</p>
-                                     <div className="flex justify-center space-x-2 mt-1 text-base">
-                                        {SPEED_UNITS.map(unit => (<span key={unit} className={`font-semibold transition-colors ${speedUnit === unit ? 'text-cyan-400' : 'text-gray-500'}`}>{unit}</span>))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-gray-400 uppercase">Pyle Geskiet</p>
-                                    <p className="text-5xl sm:text-6xl font-bold text-white mt-2">{sessionShots.length}</p>
-                                    <p className="text-base text-gray-300 mt-1 invisible">{speedUnit}</p>
-                                </div>
-                            </div>
-
-                            <div>
-                                <p className="text-sm text-gray-400 uppercase mb-1">
-                                     {timeElapsedToDisplay && timeElapsedToDisplay > 0
-                                        ? `Vlugtyd: ${(timeElapsedToDisplay * 1000).toFixed(1)} ms`
-                                        : 'Klankbaan'}
-                                </p>
-                                <canvas 
-                                    ref={canvasRef} 
-                                    width="400" 
-                                    height="75" 
-                                    className="bg-gray-900 rounded-lg w-full"
-                                    style={{ cursor: editingShot ? canvasCursor : 'default', touchAction: 'none' }}
-                                    onMouseDown={handleCanvasPointerDown} onMouseMove={handleCanvasPointerMove} onMouseUp={handleCanvasPointerUp}
-                                    onMouseLeave={handleCanvasPointerUp} onTouchStart={handleCanvasPointerDown} onTouchMove={handleCanvasPointerMove}
-                                    onTouchEnd={handleCanvasPointerUp}
-                                ></canvas>
-                                 <div className="flex justify-between text-xs text-gray-400 px-1 mt-1">
-                                    <span>0.0s</span><span>0.1s</span><span>0.2s</span><span>0.3s</span><span>0.4s</span><span>0.5s</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {/* Group 2: Live Audio, Mic Gain OR Edit Buttons */}
-                        {!editingShot ? (
-                            <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
-                                <div>
-                                    <p className="text-sm text-gray-400 uppercase mb-1">Huidige Klank</p>
-                                    <canvas ref={liveCanvasRef} width="400" height="75" className="bg-gray-900 rounded-lg w-full"></canvas>
-                                </div>
-                                <div>
-                                    <label htmlFor="gain" className="block text-base font-medium text-gray-300 mb-2">Mikrofoon Versterking</label>
-                                    <input
-                                        type="range" id="gain" min="0.1" max="5" step="0.1" value={gain}
-                                        onChange={(e) => setGain(parseFloat(e.target.value))}
-                                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                                    />
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl grid grid-cols-2 gap-4">
-                                <button onClick={handleSaveEdit} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Stoor</button>
-                                <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-700">Verwyder</button>
-                            </div>
-                        )}
-                        
-                        {/* Group 3: Inputs and Action Buttons */}
-                        <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
-                            <div className="flex gap-2">
-                                <div className="flex-1">
-                                    <label htmlFor="distance" className="block text-xs font-medium text-gray-300 mb-2">Afstand (m)</label>
-                                    <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
-                                        <button
-                                            onClick={() => setDistance(d => Math.max(1, (parseInt(d, 10) || 0) - 1).toString())}
-                                            disabled={isSessionActive}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                            aria-label="Verminder afstand"
-                                        >-</button>
-                                        <input 
-                                            type="number" id="distance" value={distance} 
-                                            onChange={(e) => setDistance(e.target.value)}
-                                            onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setDistance('1'); } }}
-                                            readOnly={isSessionActive}
-                                            className="w-full p-1.5 text-center text-base bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                        />
-                                        <button
-                                            onClick={() => setDistance(d => ((parseInt(d, 10) || 0) + 1).toString())}
-                                            disabled={isSessionActive}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                            aria-label="Verhoog afstand"
-                                        >+</button>
-                                    </div>
-                                </div>
-                                <div className="flex-1">
-                                    <label htmlFor="shots" className="block text-xs font-medium text-gray-300 mb-2">Aantal Pyle</label>
-                                    <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive || editingShot ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
-                                        <button
-                                            onClick={() => setShotsPerRound(s => Math.max(1, (parseInt(s, 10) || 0) - 1).toString())}
-                                            disabled={isSessionActive || editingShot}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                            aria-label="Verminder aantal pyle"
-                                        >-</button>
-                                        <input 
-                                            type="number" id="shots" value={shotsPerRound} 
-                                            onChange={(e) => setShotsPerRound(e.target.value)}
-                                            onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setShotsPerRound('1'); } }}
-                                            readOnly={isSessionActive || editingShot}
-                                            className="w-full p-1.5 text-center text-base bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                        />
-                                        <button
-                                            onClick={() => setShotsPerRound(s => ((parseInt(s, 10) || 0) + 1).toString())}
-                                            disabled={isSessionActive || editingShot}
-                                            className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
-                                            aria-label="Verhoog aantal pyle"
-                                        >+</button>
-                                    </div>
-                                </div>
-                            </div>
-                            {status === Status.IDLE || status === Status.ERROR ? (
-                                <button onClick={startSession} className="w-full flex items-center justify-center text-white text-xl font-bold py-4 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-opacity-50 bg-green-600 hover:bg-green-700">
-                                    Begin
+                    {view === 'main' ? (
+                        <>
+                            <div className="w-full max-w-md mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-4 text-center relative">
+                                <button onClick={() => setView('data')} className="absolute top-5 left-5 p-2 z-10 text-gray-400 hover:text-cyan-400 transition-colors" aria-label="Maak Data Kieslys oop">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                    </svg>
                                 </button>
-                             ) : status === Status.RECORDING || status === Status.PAUSED ? (
-                                <div className="grid grid-cols-2 gap-4">
-                                    {status === Status.RECORDING ? (
-                                        <button onClick={handlePause} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-yellow-600 hover:bg-yellow-700">Pouse</button>
-                                    ) : (
-                                        <button onClick={handleContinue} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">Gaan Voort</button>
-                                    )}
-                                    <button onClick={stopAndSave} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-600">Stop en Stoor</button>
-                                </div>
-                             ) : status === Status.ROUND_COMPLETE && (
-                                <div className="text-center">
-                                    <p className="text-lg text-gray-300 mb-4">Rondte Voltooi!</p>
-                                    <div className="space-y-3">
-                                        <button onClick={handleNextRound} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Volgende {shotsPerRound} pyle</button>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <button onClick={handleAddOneShot} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">+1</button>
-                                            <button onClick={handleEndSession} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-gray-600 hover:bg-gray-700">Eindig</button>
+
+                                <img src="Untitled.png" alt="Skerpskoot" className="w-3/4 mx-auto mb-2" />
+                                
+                                <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="cursor-pointer" onClick={handleUnitCycle} title="Klik om eenhede te verander">
+                                            <p className="text-sm text-gray-400 uppercase">{editingShot ? 'Gewysigde Spoed' : 'Huidige Spoed'}</p>
+                                            <p className="text-3xl sm:text-4xl font-bold text-white">{currentSpeedDisplay !== null ? currentSpeedDisplay.toFixed(2) : '--'}</p>
+                                             <div className="flex justify-center space-x-2 mt-1 text-base">
+                                                {SPEED_UNITS.map(unit => (<span key={unit} className={`font-semibold transition-colors ${speedUnit === unit ? 'text-cyan-400' : 'text-gray-500'}`}>{unit}</span>))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-gray-400 uppercase">Pyle Geskiet</p>
+                                            <p className="text-5xl sm:text-6xl font-bold text-white mt-2">{sessionShots.length}</p>
+                                            <p className="text-base text-gray-300 mt-1 invisible">{speedUnit}</p>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <p className="text-sm text-gray-400 uppercase mb-1">
+                                             {timeElapsedToDisplay && timeElapsedToDisplay > 0
+                                                ? `Vlugtyd: ${(timeElapsedToDisplay * 1000).toFixed(1)} ms`
+                                                : 'Klankbaan'}
+                                        </p>
+                                        <canvas 
+                                            ref={canvasRef} 
+                                            width="400" 
+                                            height="75" 
+                                            className="bg-gray-900 rounded-lg w-full"
+                                            style={{ cursor: editingShot ? canvasCursor : 'default', touchAction: 'none' }}
+                                            onMouseDown={handleCanvasPointerDown} onMouseMove={handleCanvasPointerMove} onMouseUp={handleCanvasPointerUp}
+                                            onMouseLeave={handleCanvasPointerUp} onTouchStart={handleCanvasPointerDown} onTouchMove={handleCanvasPointerMove}
+                                            onTouchEnd={handleCanvasPointerUp}
+                                        ></canvas>
+                                         <div className="flex justify-between text-xs text-gray-400 px-1 mt-1">
+                                            <span>0.0s</span><span>0.1s</span><span>0.2s</span><span>0.3s</span><span>0.4s</span><span>0.5s</span>
                                         </div>
                                     </div>
                                 </div>
-                             )}
-                        </div>
-                        {error && <p className="text-red-400 font-semibold pt-2">{error}</p>}
-                    </div>
-                    
-                    {history.length > 0 && (
-                        <div className="w-full max-w-md mx-auto mt-8 mb-4">
-                            <h2 className="text-xl font-bold text-cyan-400 text-center mb-4">Vorige Sessies</h2>
-                            <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                                {history.map(session => {
-                                    const convertedAvgSpeed = convertSpeed(session.averageSpeed, speedUnit);
-                                    return (
-                                    <details key={session.id} className="bg-gray-800 rounded-lg overflow-hidden animate-fade-in">
-                                        <summary className="p-3 sm:p-4 cursor-pointer list-none flex justify-between items-center">
-                                            <div className="text-left">
-                                                <div className="text-xs text-gray-400 flex items-center">
-                                                    {session.active && <span className="inline-block bg-green-500 rounded-full h-2 w-2 mr-2 animate-pulse"></span>}
-                                                    {new Date(session.createdAt).toLocaleDateString()}
-                                                    {session.active && <span className="text-green-400 font-bold ml-2 uppercase">Live</span>}
-                                                </div>
-                                                <div className="text-md font-semibold mt-1">{session.distance}m &middot; {session.shots.length} Pyle</div>
-                                            </div>
-                                            <div className="flex items-center text-right">
-                                                <div className="text-cyan-400 text-xl sm:text-2xl font-bold">{convertedAvgSpeed !== null ? convertedAvgSpeed.toFixed(2) : '--'} {speedUnit}</div>
-                                                <div className="details-marker text-cyan-400 transform transition-transform duration-200 ml-2 sm:ml-4">&#x276F;</div>
-                                            </div>
-                                        </summary>
-                                        <div className="bg-gray-900/50 p-4 border-t border-gray-700">
-                                            <h4 className="font-semibold mb-2">Individuele Pyle:</h4>
-                                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 text-sm">
-                                                {session.shots.map((shot, index) => {
-                                                    const convertedShotSpeed = convertSpeed(shot.speed, speedUnit);
-                                                    const canEdit = !isSessionActive;
-                                                    return (
-                                                        <div key={index} onClick={() => canEdit && handleEditShot(session.id, index)} className={`bg-gray-700 p-2 rounded-md text-center ${canEdit ? 'cursor-pointer hover:bg-gray-600' : ''}`}>
-                                                            <div className="text-xs text-gray-400">Pyl {index + 1}</div>
-                                                            <div className="font-semibold">{convertedShotSpeed !== null ? convertedShotSpeed.toFixed(1) : '--'}</div>
-                                                        </div>
-                                                    );
-                                                })}
+                                
+                                {!editingShot ? (
+                                    <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                                        <div>
+                                            <p className="text-sm text-gray-400 uppercase mb-1">Huidige Klank</p>
+                                            <canvas ref={liveCanvasRef} width="400" height="75" className="bg-gray-900 rounded-lg w-full"></canvas>
+                                        </div>
+                                        <div>
+                                            <label htmlFor="gain" className="block text-base font-medium text-gray-300 mb-2">Mikrofoon Versterking</label>
+                                            <input
+                                                type="range" id="gain" min="0.1" max="5" step="0.1" value={gain}
+                                                onChange={(e) => setGain(parseFloat(e.target.value))}
+                                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                            />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl grid grid-cols-2 gap-4">
+                                        <button onClick={handleSaveEdit} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Stoor</button>
+                                        <button onClick={() => setShowDeleteConfirm(true)} className="w-full text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-700">Verwyder</button>
+                                    </div>
+                                )}
+                                
+                                <div className="bg-gray-700/50 border border-gray-600 p-4 rounded-xl space-y-4">
+                                    <div className="flex gap-2">
+                                        <div className="flex-1">
+                                            <label htmlFor="distance" className="block text-xs font-medium text-gray-300 mb-2">Afstand (m)</label>
+                                            <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
+                                                <button
+                                                    onClick={() => setDistance(d => Math.max(1, (parseInt(d, 10) || 0) - 1).toString())}
+                                                    disabled={isSessionActive}
+                                                    className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                                    aria-label="Verminder afstand"
+                                                >-</button>
+                                                <input 
+                                                    type="number" id="distance" value={distance} 
+                                                    onChange={(e) => setDistance(e.target.value)}
+                                                    onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setDistance('1'); } }}
+                                                    readOnly={isSessionActive}
+                                                    className="w-full p-1.5 text-center text-base bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                />
+                                                <button
+                                                    onClick={() => setDistance(d => ((parseInt(d, 10) || 0) + 1).toString())}
+                                                    disabled={isSessionActive}
+                                                    className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                                    aria-label="Verhoog afstand"
+                                                >+</button>
                                             </div>
                                         </div>
-                                    </details>
-                                )})}
+                                        <div className="flex-1">
+                                            <label htmlFor="shots" className="block text-xs font-medium text-gray-300 mb-2">Aantal Pyle</label>
+                                            <div className={`flex items-stretch w-full bg-gray-700 border-2 border-gray-600 rounded-lg transition ${isSessionActive || editingShot ? 'bg-gray-700/50 cursor-not-allowed' : 'focus-within:ring-2 focus-within:ring-cyan-500 focus-within:border-cyan-500'}`}>
+                                                <button
+                                                    onClick={() => setShotsPerRound(s => Math.max(1, (parseInt(s, 10) || 0) - 1).toString())}
+                                                    disabled={isSessionActive || editingShot}
+                                                    className="px-4 text-2xl font-bold text-cyan-400 border-r border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                                    aria-label="Verminder aantal pyle"
+                                                >-</button>
+                                                <input 
+                                                    type="number" id="shots" value={shotsPerRound} 
+                                                    onChange={(e) => setShotsPerRound(e.target.value)}
+                                                    onBlur={(e) => { if (!e.target.value || parseInt(e.target.value, 10) <= 0) { setShotsPerRound('1'); } }}
+                                                    readOnly={isSessionActive || editingShot}
+                                                    className="w-full p-1.5 text-center text-base bg-transparent text-white focus:outline-none transition read-only:cursor-not-allowed appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                />
+                                                <button
+                                                    onClick={() => setShotsPerRound(s => ((parseInt(s, 10) || 0) + 1).toString())}
+                                                    disabled={isSessionActive || editingShot}
+                                                    className="px-4 text-2xl font-bold text-cyan-400 border-l border-gray-600 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none"
+                                                    aria-label="Verhoog aantal pyle"
+                                                >+</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {status === Status.IDLE || status === Status.ERROR ? (
+                                        <button onClick={startSession} className="w-full flex items-center justify-center text-white text-xl font-bold py-4 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-opacity-50 bg-green-600 hover:bg-green-700">
+                                            Begin
+                                        </button>
+                                     ) : status === Status.RECORDING || status === Status.PAUSED ? (
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {status === Status.RECORDING ? (
+                                                <button onClick={handlePause} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-yellow-600 hover:bg-yellow-700">Pouse</button>
+                                            ) : (
+                                                <button onClick={handleContinue} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">Gaan Voort</button>
+                                            )}
+                                            <button onClick={stopAndSave} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-red-600 hover:bg-red-600">Stop en Stoor</button>
+                                        </div>
+                                     ) : status === Status.ROUND_COMPLETE && (
+                                        <div className="text-center">
+                                            <p className="text-lg text-gray-300 mb-4">Rondte Voltooi!</p>
+                                            <div className="space-y-3">
+                                                <button onClick={handleNextRound} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-green-600 hover:bg-green-700">Volgende {shotsPerRound} pyle</button>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <button onClick={handleAddOneShot} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700">+1</button>
+                                                    <button onClick={handleEndSession} className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-gray-600 hover:bg-gray-700">Eindig</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                     )}
+                                </div>
+                                {error && <p className="text-red-400 font-semibold pt-2">{error}</p>}
                             </div>
-                        </div>
-                    )}
+                            
+                            {history.length > 0 && (
+                                <div className="w-full max-w-md mx-auto mt-8 mb-4">
+                                    <h2 className="text-xl font-bold text-cyan-400 text-center mb-4">Vorige Sessies</h2>
+                                    <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                        {history.map(session => {
+                                            const convertedAvgSpeed = convertSpeed(session.averageSpeed, speedUnit);
+                                            return (
+                                            <details key={session.id} className="bg-gray-800 rounded-lg overflow-hidden animate-fade-in">
+                                                <summary className="p-3 sm:p-4 cursor-pointer list-none flex justify-between items-center">
+                                                    <div className="text-left">
+                                                        <div className="text-xs text-gray-400 flex items-center">
+                                                            {session.active && <span className="inline-block bg-green-500 rounded-full h-2 w-2 mr-2 animate-pulse"></span>}
+                                                            {new Date(session.createdAt).toLocaleDateString()}
+                                                            {session.active && <span className="text-green-400 font-bold ml-2 uppercase">Live</span>}
+                                                        </div>
+                                                        <div className="text-md font-semibold mt-1">{session.distance}m &middot; {session.shots.length} Pyle</div>
+                                                    </div>
+                                                    <div className="flex items-center text-right">
+                                                        <div className="text-cyan-400 text-xl sm:text-2xl font-bold">{convertedAvgSpeed !== null ? convertedAvgSpeed.toFixed(2) : '--'} {speedUnit}</div>
+                                                        <div className="details-marker text-cyan-400 transform transition-transform duration-200 ml-2 sm:ml-4">&#x276F;</div>
+                                                    </div>
+                                                </summary>
+                                                <div className="bg-gray-900/50 p-4 border-t border-gray-700">
+                                                    <h4 className="font-semibold mb-2">Individuele Pyle:</h4>
+                                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 text-sm">
+                                                        {session.shots.map((shot, index) => {
+                                                            const convertedShotSpeed = convertSpeed(shot.speed, speedUnit);
+                                                            const canEdit = !isSessionActive;
+                                                            return (
+                                                                <div key={index} onClick={() => canEdit && handleEditShot(session.id, index)} className={`bg-gray-700 p-2 rounded-md text-center ${canEdit ? 'cursor-pointer hover:bg-gray-600' : ''}`}>
+                                                                    <div className="text-xs text-gray-400">Pyl {index + 1}</div>
+                                                                    <div className="font-semibold">{convertedShotSpeed !== null ? convertedShotSpeed.toFixed(1) : '--'}</div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            </details>
+                                        )})}
+                                    </div>
+                                </div>
+                            )}
 
-                    {installPromptEvent && (
-                        <div className="w-full max-w-md mx-auto mt-4 mb-4">
-                            <button 
-                                onClick={handleInstallClick} 
-                                className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700"
-                            >
-                                Installeer
-                            </button>
-                        </div>
+                            {installPromptEvent && (
+                                <div className="w-full max-w-md mx-auto mt-4 mb-4">
+                                    <button 
+                                        onClick={handleInstallClick} 
+                                        className="w-full flex items-center justify-center text-white text-lg font-bold py-3 px-4 rounded-lg transition duration-300 bg-blue-600 hover:bg-blue-700"
+                                    >
+                                        Installeer
+                                    </button>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                         <MyDataPage 
+                            setView={setView} 
+                            history={history} 
+                            speedUnit={speedUnit}
+                            drawLength={drawLength} setDrawLength={setDrawLength}
+                            drawWeight={drawWeight} setDrawWeight={setDrawWeight}
+                            arrowMass={arrowMass} setArrowMass={setArrowMass}
+                         />
                     )}
                     
                     {showDeleteConfirm && (
